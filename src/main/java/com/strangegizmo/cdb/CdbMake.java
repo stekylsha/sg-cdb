@@ -50,7 +50,7 @@ public final class CdbMake {
 
 	/** The list of hash pointers in the file, in their order in the
 	 * constant database. */
-	private Vector hashPointers_ = null;
+	private Vector<CdbHashPointer> hashPointers_ = null;
 
 	/** The number of entries in each hash table. */
 	private int[] tableCount_ = null;
@@ -79,7 +79,7 @@ public final class CdbMake {
 	 */
 	public void start(String filepath) throws IOException {
 		/* Initialize the class. */
-		hashPointers_ = new Vector();
+		hashPointers_ = new Vector<>();
 		tableCount_ = new int[256];
 		tableStart_ = new int[256];
 
@@ -424,26 +424,25 @@ public final class CdbMake {
 		File cdb = new File(cdbFilepath);
 		tmp.renameTo(cdb);
 	}
-}
+
+    private class CdbHashPointer {
+        /** The hash value of this entry. */
+        int hash;
+
+        /** The position in the constant database of this entry. */
+        int pos;
 
 
-class CdbHashPointer {
-	/** The hash value of this entry. */
-	int hash;
-
-	/** The position in the constant database of this entry. */
-	int pos;
-
-
-	/**
-	 * Creates a new CdbHashPointer and initializes it with the given
-	 * hash value and position.
-	 *
-	 * @param hash The hash value for this hash pointer.
-	 * @param pos The position of this entry in the constant database.
-	 */
-	CdbHashPointer(int hash, int pos) {
-		this.hash = hash;
-		this.pos = pos;
-	}
+        /**
+         * Creates a new CdbHashPointer and initializes it with the given
+         * hash value and position.
+         *
+         * @param hash The hash value for this hash pointer.
+         * @param pos The position of this entry in the constant database.
+         */
+        CdbHashPointer(int hash, int pos) {
+            this.hash = hash;
+            this.pos = pos;
+        }
+    }
 }
