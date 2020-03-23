@@ -411,7 +411,7 @@ public final class CdbMake {
 
 			/* Add the key/data pair to the database if it is not in
 			 * ignoreCdb. */
-			if ( (ignoreCdb == null) || (ignoreCdb.find(data) == null) )
+			if ( (ignoreCdb == null) || (ignoreCdb.find(new String(data)) == null) )
 				cdbMake.add(key, data);
 
 			/* Read the terminating LF. */
