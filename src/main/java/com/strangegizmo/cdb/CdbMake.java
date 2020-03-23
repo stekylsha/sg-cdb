@@ -33,8 +33,15 @@
 package com.strangegizmo.cdb;
 
 /* Java imports. */
-import java.io.*;
-import java.util.*;
+
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.RandomAccessFile;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * CdbMake implements the database-creation side of
@@ -50,7 +57,7 @@ public final class CdbMake {
 
 	/** The list of hash pointers in the file, in their order in the
 	 * constant database. */
-	private Vector<CdbHashPointer> hashPointers_ = null;
+	private List<CdbHashPointer> hashPointers_ = null;
 
 	/** The number of entries in each hash table. */
 	private int[] tableCount_ = null;
@@ -79,7 +86,7 @@ public final class CdbMake {
 	 */
 	public void start(String filepath) throws IOException {
 		/* Initialize the class. */
-		hashPointers_ = new Vector<>();
+		hashPointers_ = new ArrayList<>();
 		tableCount_ = new int[256];
 		tableStart_ = new int[256];
 
@@ -119,7 +126,7 @@ public final class CdbMake {
 
 		/* Add the hash pointer to our list. */
 		int hash = Cdb.hash(key);
-		hashPointers_.addElement(new CdbHashPointer(hash, pos_));
+		hashPointers_.add(new CdbHashPointer(hash, pos_));
 
 		/* Add this item to the count. */
 		tableCount_[hash & 0xff]++;
@@ -148,10 +155,7 @@ public final class CdbMake {
 		/* Create a new hash pointer list in order by hash table. */
 		CdbHashPointer[] slotPointers
 			= new CdbHashPointer[hashPointers_.size()];
-		for (Enumeration e = hashPointers_.elements(); e.hasMoreElements(); ) {
-			CdbHashPointer hp = (CdbHashPointer)e.nextElement();
-			slotPointers[--tableStart_[hp.hash & 0xff]] = hp;
-		}
+		hashPointers_.forEach(chp -> slotPointers[--tableStart_[chp.hash & 0xff]] = chp);
 
 		/* Write out each of the hash tables, building the slot table in
 		 * the process. */
@@ -161,18 +165,19 @@ public final class CdbMake {
 			int len = tableCount_[i] * 2;
 
 			/* Store the position of this table in the slot table. */
-			slotTable[(i * 8) + 0] = (byte)(pos_ & 0xff);
+			slotTable[(i * 8)]     = (byte)(pos_ & 0xff);
 			slotTable[(i * 8) + 1] = (byte)((pos_ >>>  8) & 0xff);
 			slotTable[(i * 8) + 2] = (byte)((pos_ >>> 16) & 0xff);
 			slotTable[(i * 8) + 3] = (byte)((pos_ >>> 24) & 0xff);
-			slotTable[(i * 8) + 4 + 0] = (byte)(len & 0xff);
+
+			slotTable[(i * 8) + 4]     = (byte)(len & 0xff);
 			slotTable[(i * 8) + 4 + 1] = (byte)((len >>>  8) & 0xff);
 			slotTable[(i * 8) + 4 + 2] = (byte)((len >>> 16) & 0xff);
 			slotTable[(i * 8) + 4 + 3] = (byte)((len >>> 24) & 0xff);
 
 			/* Build the hash table. */
 			int curSlotPointer = tableStart_[i];
-			CdbHashPointer hashTable[] = new CdbHashPointer[len];
+			CdbHashPointer[] hashTable = new CdbHashPointer[len];
 			for (int u = 0; u < tableCount_[i]; u++) {
 				/* Get the hash pointer. */
 				CdbHashPointer hp = slotPointers[curSlotPointer++];
@@ -425,7 +430,7 @@ public final class CdbMake {
 		tmp.renameTo(cdb);
 	}
 
-    private class CdbHashPointer {
+    private static class CdbHashPointer {
         /** The hash value of this entry. */
         int hash;
 
