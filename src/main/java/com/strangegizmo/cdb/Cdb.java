@@ -35,12 +35,14 @@ package com.strangegizmo.cdb;
 /* Java imports. */
 
 import java.io.BufferedInputStream;
+import java.io.DataInput;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -50,7 +52,13 @@ import java.util.List;
  * @author Michael Alyn Miller <malyn@strangeGizmo.com>
  * @version 1.0.3
  */
-public class Cdb {
+public class Cdb implements Iterable<CdbElement> {
+    private static final long LONG_BYTE_MASK = 0x00ffL;
+    private static final long LONG_INT_MASK = 0x00ffffffffL;
+    private static final int INT_BYTE_MASK = 0x00ff;
+
+    private static final int SLOT_TABLE_PAIRS = 256;
+
     /**
      * The RandomAccessFile for the CDB file.
      */
@@ -103,24 +111,14 @@ public class Cdb {
         /* Read and parse the slot table.  We do not throw an exception
          * if this fails; the file might empty, which is not an error. */
         try {
-            /* Read the table. */
-            byte[] table = new byte[2048];
-            file_.readFully(table);
-
             /* Create and parse the table. */
-            slotTable_ = new int[256 * 2];
+            slotTable_ = new int[SLOT_TABLE_PAIRS * 2];
 
             int offset = 0;
-            for (int i = 0; i < 256; i++) {
-                int pos = table[offset++] & 0xff
-                        | ((table[offset++] & 0xff) << 8)
-                        | ((table[offset++] & 0xff) << 16)
-                        | ((table[offset++] & 0xff) << 24);
+            for (int i = 0; i < SLOT_TABLE_PAIRS; i++) {
+                int pos = readInt(file_);
 
-                int len = table[offset++] & 0xff
-                        | ((table[offset++] & 0xff) << 8)
-                        | ((table[offset++] & 0xff) << 16)
-                        | ((table[offset++] & 0xff) << 24);
+                int len = readInt(file_);
 
                 slotTable_[i << 1] = pos;
                 slotTable_[(i << 1) + 1] = len;
@@ -154,28 +152,13 @@ public class Cdb {
 
         /* Add each byte to the hash value. */
         for (byte b : key) {
-//			h = ((h << 5) + h) ^ key[i];
-            long l = h << 5;
-            h += (l & 0x00000000ffffffffL);
-            h = (h & 0x00000000ffffffffL);
-
-            int k = b;
-            k = (k + 0x100) & 0xff;
-
-            h = h ^ k;
+            // h = ((h << 5) + h) ^ key[i];
+            long k = (long)b & LONG_BYTE_MASK;
+            h = (((h << 5) + h) ^ k) & LONG_INT_MASK;
         }
 
         /* Return the hash value. */
-        return (int) (h & 0x00000000ffffffffL);
-    }
-
-    /**
-     * Prepares the class to search for the given key.
-     *
-     * @param key The key to search for.
-     */
-    public final void findstart(String key) {
-        findinit();
+        return (int) (h & LONG_INT_MASK);
     }
 
     /**
@@ -192,7 +175,7 @@ public class Cdb {
      * @return The record store under the given key, or
      * <code>null</code> if no record with that key could be found.
      */
-    public final synchronized String find(String key) {
+    public final synchronized byte[] find(byte[] key) {
         findinit();
         return findnext(key);
     }
@@ -204,10 +187,10 @@ public class Cdb {
      * @return The record store under the given key, or
      * <code>null</code> if no record with that key could be found.
      */
-    public final synchronized List<String> findall(String key) {
+    public final synchronized List<byte[]> findall(byte[] key) {
         findinit();
-        List<String> values = new ArrayList<>();
-        String value;
+        List<byte[]> values = new ArrayList<>();
+        byte[] value;
         while ((value = findnext(key)) != null) {
             values.add(value);
         }
@@ -217,12 +200,11 @@ public class Cdb {
     /**
      * Finds the next record stored under the given key.
      *
-     * @param keyString The key to search for.
+     * @param key The key to search for.
      * @return The next record store under the given key, or
      * <code>null</code> if no record with that key could be found.
      */
-    public final synchronized String findnext(String keyString) {
-        byte[] key = keyString.getBytes();
+    public final synchronized byte[] findnext(byte[] key) {
         /* There are no keys if we could not read the slot table. */
 		if (slotTable_ == null) {
 			return null;
@@ -257,15 +239,8 @@ public class Cdb {
                 /* Read the entry for this key from the hash slot. */
                 file_.seek(kpos_);
 
-                int h = file_.readUnsignedByte()
-                        | (file_.readUnsignedByte() << 8)
-                        | (file_.readUnsignedByte() << 16)
-                        | (file_.readUnsignedByte() << 24);
-
-                int pos = file_.readUnsignedByte()
-                        | (file_.readUnsignedByte() << 8)
-                        | (file_.readUnsignedByte() << 16)
-                        | (file_.readUnsignedByte() << 24);
+                int h = readInt(file_);
+                int pos = readInt(file_);
 				if (pos == 0) {
 					return null;
 				}
@@ -289,18 +264,12 @@ public class Cdb {
                  * entry. */
                 file_.seek(pos);
 
-                int klen = file_.readUnsignedByte()
-                        | (file_.readUnsignedByte() << 8)
-                        | (file_.readUnsignedByte() << 16)
-                        | (file_.readUnsignedByte() << 24);
+                int klen = readInt(file_);
 				if (klen != key.length) {
 					continue;
 				}
 
-                int dlen = file_.readUnsignedByte()
-                        | (file_.readUnsignedByte() << 8)
-                        | (file_.readUnsignedByte() << 16)
-                        | (file_.readUnsignedByte() << 24);
+                int dlen = readInt(file_);
 
                 /* Read the key stored in this entry and compare it to
                  * the key we were given. */
@@ -322,7 +291,7 @@ public class Cdb {
                 /* The keys match, return the data. */
                 byte[] d = new byte[dlen];
                 file_.readFully(d);
-                return new String(d);
+                return d;
             }
         } catch (IOException ignored) {
             return null;
@@ -333,96 +302,71 @@ public class Cdb {
     }
 
     /**
-     * Returns an Enumeration containing a CdbElement for each entry in
-     * the constant database.
-     *
-     * @param filepath The CDB file to read.
-     * @return An Enumeration containing a CdbElement for each entry in
-     * the constant database.
-     * @throws java.io.IOException if an error occurs reading the
-     *                             constant database.
+     * @inheritDoc
      */
-    public static Enumeration<CdbElement> elements(final String filepath)
-            throws IOException {
-        /* Open the data file. */
-        final InputStream in
-                = new BufferedInputStream(
-                new FileInputStream(
-                        filepath));
+    public Iterator<CdbElement> iterator() {
+        final int endOfData;
+        try {
+            file_.seek(0);
+            int tmpEod = readInt(file_);
+            /* Skip the rest of the hashtable. */
+            file_.seek(2048);
+            endOfData = tmpEod;
+        } catch  (IOException ioe) {
+            throw new CdbException("Iterator creation failure", ioe);
+        }
 
-        /* Read the end-of-data value. */
-        final int eod = (in.read() & 0xff)
-                | ((in.read() & 0xff) << 8)
-                | ((in.read() & 0xff) << 16)
-                | ((in.read() & 0xff) << 24);
-
-        /* Skip the rest of the hashtable. */
-        in.skip(2048 - 4);
-
-        /* Return the Enumeration. */
-        return new Enumeration<>() {
-            /* Current data pointer. */
-            int pos = 2048;
-
-            /* Finalizer. */
-            @SuppressWarnings({"deprecation"})
-            protected void finalize() {
-                try { in.close(); } catch (Exception ignored) {}
-            }
-
-            /* Returns <code>true</code> if there are more elements in
-             * the constant database (pos < eod); <code>false</code>
-             * otherwise. */
-            public boolean hasMoreElements() {
-                return pos < eod;
-            }
-
-            /* Returns the next data element in the CDB file. */
-            public synchronized CdbElement nextElement() {
+        return new Iterator<>() {
+            private long lastOffset;
+            {
                 try {
-                    /* Read the key and value lengths. */
-                    int klen = readLeInt();
-                    pos += 4;
-                    int dlen = readLeInt();
-                    pos += 4;
-
-                    /* Read the key. */
-                    byte[] key = new byte[klen];
-                    for (int off = 0; off < klen; /* below */) {
-                        int count = in.read(key, off, klen - off);
-						if (count == -1) {
-							throw new IllegalArgumentException("invalid cdb format");
-						}
-                        off += count;
-                    }
-                    pos += klen;
-
-                    /* Read the data. */
-                    byte[] data = new byte[dlen];
-                    for (int off = 0; off < dlen; /* below */) {
-                        int count = in.read(data, off, dlen - off);
-						if (count == -1) {
-							throw new IllegalArgumentException("invalid cdb format");
-						}
-                        off += count;
-                    }
-                    pos += dlen;
-
-                    /* Return a CdbElement with the key and data. */
-                    return new CdbElement(key, data);
-                } catch (IOException ioException) {
-                    throw new IllegalArgumentException(
-                            "invalid cdb format");
+                    lastOffset = file_.getFilePointer();
+                } catch (IOException ioe) {
+                    throw new CdbException("Iterator initialization failure", ioe);
                 }
             }
 
-            /* Reads a little-endian integer from <code>in</code>. */
-            private int readLeInt() throws IOException {
-                return (in.read() & 0xff)
-                        | ((in.read() & 0xff) << 8)
-                        | ((in.read() & 0xff) << 16)
-                        | ((in.read() & 0xff) << 24);
+            @Override
+            public boolean hasNext() {
+                return lastOffset < endOfData;
+            }
+
+            @Override
+            public CdbElement next() {
+                try {
+                    // make sure to pick up where we left off
+                    if (lastOffset != file_.getFilePointer()) {
+                        file_.seek(lastOffset);
+                    }
+
+                    // read key/value lengths
+                    int keyLength = readInt(file_);
+                    int valueLength = readInt(file_);
+
+                    // read the key
+                    byte[] key = new byte[keyLength];
+                    if (file_.read(key) != keyLength) {
+                        throw new IOException("unrecognizable cdb format");
+                    }
+                    // read the value
+                    byte[] value = new byte[valueLength];
+                    if (file_.read(value) != valueLength) {
+                        throw new IOException("unrecognizable cdb format");
+                    }
+
+                    lastOffset = file_.getFilePointer();
+                    return new CdbElement(key, value);
+                } catch (IOException ioe) {
+                    throw new CdbException("Iterator next failure", ioe);
+                }
             }
         };
+    }
+
+    private int readInt(DataInput in) throws IOException {
+        return (in.readUnsignedByte() & INT_BYTE_MASK)
+                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 8)
+                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 16)
+                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 24);
     }
 }
