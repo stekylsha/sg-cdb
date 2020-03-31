@@ -40,10 +40,10 @@ package com.strangegizmo.cdb;
  */
 public final class CdbElement {
 	/** The key value for this element. */
-	private final byte[] key_;
+	private final byte[] key;
 
 	/** The data value for this element. */
-	private final byte[] data_;
+	private final byte[] data;
 
 
 	/**
@@ -54,8 +54,8 @@ public final class CdbElement {
 	 * @param data The data value for this element.
 	 */
 	public CdbElement(byte[] key, byte[] data) {
-		this.key_ = key;
-		this.data_ = data;
+		this.key = key;
+		this.data = data;
 	}
 
 
@@ -65,7 +65,7 @@ public final class CdbElement {
 	 * @return This element's key.
 	 */
 	public final byte[] getKey() {
-		return key_;
+		return key;
 	}
 
 	/**
@@ -74,6 +74,17 @@ public final class CdbElement {
 	 * @return This element's data.
 	 */
 	public final byte[] getData() {
-		return data_;
+		return data;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public String toString() {
+		return "CdbElement{" +
+				"key=" + new String(key) +
+				", data=" + new String(data) +
+				'}';
 	}
 }

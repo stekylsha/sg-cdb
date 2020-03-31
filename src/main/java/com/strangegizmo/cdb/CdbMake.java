@@ -51,7 +51,7 @@ import java.util.List;
  * @version 1.0.0
  */
 public final class CdbMake {
-	private static final int MAX_DATA_LENGTH = 429_496_720;
+	private static final int MAX_DATA_LENGTH = Integer.MAX_VALUE; // 429_496_720?;
 
     /**
      * The RandomAccessFile for the CDB file.
@@ -357,43 +357,9 @@ public final class CdbMake {
 
             /* Get the key length. */
             int klen = readInt(in, ',');
-            /*
-            while (true) {
-                ch = in.read();
-				if (ch == ',') {
-					break;
-				}
-				if (!Character.isDigit(ch)) {
-					throw new IllegalArgumentException(
-							"input file not in correct format");
-				}
-				if (klen > MAX_DATA_LENGTH) {
-					throw new IllegalArgumentException(
-							"key length is too big");
-				}
-                klen = klen * 10 + (ch - '0');
-            }
-            */
 
             /* Get the data length. */
             int dlen = readInt(in, ':');
-            /*
-            while (true) {
-                ch = in.read();
-				if (ch == ':') {
-					break;
-				}
-				if (!Character.isDigit(ch)) {
-					throw new IllegalArgumentException(
-							"input file not in correct format");
-				}
-				if (dlen > MAX_DATA_LENGTH) {
-					throw new IllegalArgumentException(
-							"data length is too big");
-				}
-                dlen = dlen * 10 + (ch - '0');
-            }
-            */
 
             /* Read in the key. */
             byte[] key = new byte[klen];
