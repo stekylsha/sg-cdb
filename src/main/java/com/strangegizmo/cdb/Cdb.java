@@ -58,39 +58,39 @@ public class Cdb implements Iterable<CdbElement> {
     /**
      * The RandomAccessFile for the CDB file.
      */
-    private RandomAccessFile file_;
+    private RandomAccessFile cdbFile;
 
     /**
      * The slot pointers, cached here for efficiency as we do not have
      * mmap() to do it for us.  These entries are paired as (pos, len)
      * tuples.
      */
-    private int[] slotTable_;
+    private int[] slotTable;
 
     /**
      * The number of hash slots searched under this key.
      */
-    private int loop_ = 0;
+    private int hashSlotIndex = 0;
 
     /**
      * The hash value for the current key.
      */
-    private int khash_ = 0;
+    private int keyHash = 0;
 
     /**
      * The number of hash slots in the hash table for the current key.
      */
-    private int hslots_ = 0;
+    private int hashSlotCount = 0;
 
     /**
      * The position of the hash table for the current key
      */
-    private int hpos_ = 0;
+    private int hashPosition = 0;
 
     /**
      * The position of the current key in the slot.
      */
-    private int kpos_ = 0;
+    private int keyPosition = 0;
 
     /**
      * Creates an instance of the Cdb class and loads the given CDB
@@ -102,25 +102,24 @@ public class Cdb implements Iterable<CdbElement> {
      */
     public Cdb(String filepath) throws IOException {
         /* Open the CDB file. */
-        file_ = new RandomAccessFile(filepath, "r");
+        cdbFile = new RandomAccessFile(filepath, "r");
 
         /* Read and parse the slot table.  We do not throw an exception
          * if this fails; the file might empty, which is not an error. */
         try {
             /* Create and parse the table. */
-            slotTable_ = new int[SLOT_TABLE_PAIRS * 2];
+            slotTable = new int[SLOT_TABLE_PAIRS * 2];
 
-            int offset = 0;
             for (int i = 0; i < SLOT_TABLE_PAIRS; i++) {
-                int pos = readInt(file_);
+                int pos = readInt(cdbFile);
 
-                int len = readInt(file_);
+                int len = readInt(cdbFile);
 
-                slotTable_[i << 1] = pos;
-                slotTable_[(i << 1) + 1] = len;
+                slotTable[i << 1] = pos;
+                slotTable[(i << 1) + 1] = len;
             }
         } catch (IOException ignored) {
-            slotTable_ = null;
+            slotTable = null;
         }
     }
 
@@ -130,38 +129,10 @@ public class Cdb implements Iterable<CdbElement> {
     public final void close() {
         /* Close the CDB file. */
         try {
-            file_.close();
-            file_ = null;
+            cdbFile.close();
+            cdbFile = null;
         } catch (IOException ignored) {
         }
-    }
-
-    /**
-     * Computes and returns the hash value for the given key.
-     *
-     * @param key The key to compute the hash value for.
-     * @return The hash value of <code>key</code>.
-     */
-    static final int hash(byte[] key) {
-        /* Initialize the hash value. */
-        long h = 5381;
-
-        /* Add each byte to the hash value. */
-        for (byte b : key) {
-            // h = ((h << 5) + h) ^ key[i];
-            long k = (long)b & LONG_BYTE_MASK;
-            h = (((h << 5) + h) ^ k) & LONG_INT_MASK;
-        }
-
-        /* Return the hash value. */
-        return (int) (h & LONG_INT_MASK);
-    }
-
-    /**
-     * Prepares the class to search for the given key.
-     */
-    public final void findinit() {
-        loop_ = 0;
     }
 
     /**
@@ -194,49 +165,85 @@ public class Cdb implements Iterable<CdbElement> {
     }
 
     /**
+     * @inheritDoc
+     */
+    @Override
+    public Iterator<CdbElement> iterator() {
+        return new CdbIterator(cdbFile);
+    }
+
+    /**
+     * Computes and returns the hash value for the given key.
+     *
+     * @param key The key to compute the hash value for.
+     * @return The hash value of <code>key</code>.
+     */
+    static final int hash(byte[] key) {
+        /* Initialize the hash value. */
+        long h = 5381;
+
+        /* Add each byte to the hash value. */
+        for (byte b : key) {
+            // h = ((h << 5) + h) ^ key[i];
+            long k = (long)b & LONG_BYTE_MASK;
+            h = (((h << 5) + h) ^ k) & LONG_INT_MASK;
+        }
+
+        /* Return the hash value. */
+        return (int) (h & LONG_INT_MASK);
+    }
+
+    /**
+     * Prepares the class to search for the given key.
+     */
+    private final void findinit() {
+        hashSlotIndex = 0;
+    }
+
+    /**
      * Finds the next record stored under the given key.
      *
      * @param key The key to search for.
      * @return The next record store under the given key, or
      * <code>null</code> if no record with that key could be found.
      */
-    public final synchronized byte[] findnext(byte[] key) {
+    private final synchronized byte[] findnext(byte[] key) {
         /* There are no keys if we could not read the slot table. */
-		if (slotTable_ == null) {
+		if (slotTable == null) {
 			return null;
 		}
 
         /* Locate the hash entry if we have not yet done so. */
-        if (loop_ == 0) {
+        if (hashSlotIndex == 0) {
             /* Get the hash value for the key. */
             int u = hash(key);
 
             /* Unpack the information for this record. */
             int slot = u & 255;
-            hslots_ = slotTable_[(slot << 1) + 1];
-			if (hslots_ == 0) {
+            hashSlotCount = slotTable[(slot << 1) + 1];
+			if (hashSlotCount == 0) {
 				return null;
 			}
-            hpos_ = slotTable_[slot << 1];
+            hashPosition = slotTable[slot << 1];
 
             /* Store the hash value. */
-            khash_ = u;
+            keyHash = u;
 
             /* Locate the slot containing this key. */
             u >>>= 8;
-            u %= hslots_;
+            u %= hashSlotCount;
             u <<= 3;
-            kpos_ = hpos_ + u;
+            keyPosition = hashPosition + u;
         }
 
         /* Search all of the hash slots for this key. */
         try {
-            while (loop_ < hslots_) {
+            while (hashSlotIndex < hashSlotCount) {
                 /* Read the entry for this key from the hash slot. */
-                file_.seek(kpos_);
+                cdbFile.seek(keyPosition);
 
-                int h = readInt(file_);
-                int pos = readInt(file_);
+                int h = readInt(cdbFile);
+                int pos = readInt(cdbFile);
 				if (pos == 0) {
 					return null;
 				}
@@ -244,34 +251,34 @@ public class Cdb implements Iterable<CdbElement> {
                 /* Advance the loop count and key position.  Wrap the
                  * key position around to the beginning of the hash slot
                  * if we are at the end of the table. */
-                loop_ += 1;
+                hashSlotIndex += 1;
 
-                kpos_ += 8;
-				if (kpos_ == (hpos_ + (hslots_ << 3))) {
-					kpos_ = hpos_;
+                keyPosition += 8;
+				if (keyPosition == (hashPosition + (hashSlotCount << 3))) {
+					keyPosition = hashPosition;
 				}
 
                 /* Ignore this entry if the hash values do not match. */
-				if (h != khash_) {
+				if (h != keyHash) {
 					continue;
 				}
 
                 /* Get the length of the key and data in this hash slot
                  * entry. */
-                file_.seek(pos);
+                cdbFile.seek(pos);
 
-                int klen = readInt(file_);
+                int klen = readInt(cdbFile);
 				if (klen != key.length) {
 					continue;
 				}
 
-                int dlen = readInt(file_);
+                int dlen = readInt(cdbFile);
 
                 /* Read the key stored in this entry and compare it to
                  * the key we were given. */
                 boolean match = true;
                 byte[] k = new byte[klen];
-                file_.readFully(k);
+                cdbFile.readFully(k);
                 for (int i = 0; i < k.length; i++) {
                     if (k[i] != key[i]) {
                         match = false;
@@ -286,7 +293,7 @@ public class Cdb implements Iterable<CdbElement> {
 
                 /* The keys match, return the data. */
                 byte[] d = new byte[dlen];
-                file_.readFully(d);
+                cdbFile.readFully(d);
                 return d;
             }
         } catch (IOException ignored) {
@@ -297,72 +304,65 @@ public class Cdb implements Iterable<CdbElement> {
         return null;
     }
 
-    /**
-     * @inheritDoc
-     */
-    public Iterator<CdbElement> iterator() {
-        final int endOfData;
-        try {
-            file_.seek(0);
-            int tmpEod = readInt(file_);
-            /* Skip the rest of the hashtable. */
-            file_.seek(2048);
-            endOfData = tmpEod;
-        } catch  (IOException ioe) {
-            throw new CdbException("Iterator creation failure", ioe);
-        }
-
-        return new Iterator<>() {
-            private long lastOffset;
-            {
-                try {
-                    lastOffset = file_.getFilePointer();
-                } catch (IOException ioe) {
-                    throw new CdbException("Iterator initialization failure", ioe);
-                }
-            }
-
-            @Override
-            public boolean hasNext() {
-                return lastOffset < endOfData;
-            }
-
-            @Override
-            public CdbElement next() {
-                try {
-                    // make sure to pick up where we left off
-                    if (lastOffset != file_.getFilePointer()) {
-                        file_.seek(lastOffset);
-                    }
-
-                    // read key/value lengths
-                    int keyLength = readInt(file_);
-                    int valueLength = readInt(file_);
-
-                    // read the key
-                    byte[] key = new byte[keyLength];
-                    if (file_.read(key) != keyLength) {
-                        throw new IOException("unrecognizable cdb format");
-                    }
-                    // read the value
-                    byte[] value = new byte[valueLength];
-                    if (file_.read(value) != valueLength) {
-                        throw new IOException("unrecognizable cdb format");
-                    }
-
-                    lastOffset = file_.getFilePointer();
-                    return new CdbElement(key, value);
-                } catch (IOException ioe) {
-                    throw new CdbException("Iterator next failure", ioe);
-                }
-            }
-        };
-    }
-
     private int readInt(DataInput in) throws IOException {
         return (in.readUnsignedByte() & INT_BYTE_MASK)
                 | ((in.readUnsignedByte() & INT_BYTE_MASK) << 8)
                 | ((in.readUnsignedByte() & INT_BYTE_MASK) << 16)
                 | ((in.readUnsignedByte() & INT_BYTE_MASK) << 24);
+    }
+
+    private class CdbIterator implements Iterator<CdbElement> {
+        private final RandomAccessFile iteratorFile;
+        private final int endOfData;
+        private long lastOffset;
+
+        public CdbIterator(RandomAccessFile raf) {
+            try {
+                iteratorFile = raf;
+                iteratorFile.seek(0);
+                int tmpEod = readInt(iteratorFile);
+                /* Skip the rest of the hashtable. */
+                iteratorFile.seek(2048);
+                lastOffset = iteratorFile.getFilePointer();
+                endOfData = tmpEod;
+            } catch (IOException ioe) {
+                throw new CdbException("Iterator creation failure", ioe);
+            }
+        }
+
+        @Override
+        public boolean hasNext() {
+            return lastOffset < endOfData;
+        }
+
+        @Override
+        public CdbElement next() {
+            try {
+                // make sure to pick up where we left off
+                if (lastOffset != iteratorFile.getFilePointer()) {
+                    iteratorFile.seek(lastOffset);
+                }
+
+                // read key/value lengths
+                int keyLength = readInt(iteratorFile);
+                int valueLength = readInt(iteratorFile);
+
+                // read the key
+                byte[] key = new byte[keyLength];
+                if (iteratorFile.read(key) != keyLength) {
+                    throw new IOException("unrecognizable cdb format");
+                }
+                // read the value
+                byte[] value = new byte[valueLength];
+                if (iteratorFile.read(value) != valueLength) {
+                    throw new IOException("unrecognizable cdb format");
+                }
+
+                lastOffset = iteratorFile.getFilePointer();
+                return new CdbElement(key, value);
+            } catch (IOException ioe) {
+                throw new CdbException("Iterator next failure", ioe);
+            }
+        }
     }
 }
