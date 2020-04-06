@@ -32,14 +32,20 @@
 
 package com.strangegizmo.cdb;
 
-/* Java imports. */
-
-import java.io.DataInput;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Cdb implements a Java interface to D.&nbsp;J.&nbsp;Bernstein's CDB
@@ -49,11 +55,21 @@ import java.util.List;
  * @version 1.0.3
  */
 public class Cdb implements Iterable<CdbElement> {
-    private static final long LONG_BYTE_MASK = 0x00ffL;
-    private static final long LONG_INT_MASK = 0x00ffffffffL;
-    private static final int INT_BYTE_MASK = 0x00ff;
 
-    private static final int SLOT_TABLE_PAIRS = 256;
+    /**
+     * 256 entries * (4 bytes + 4 bytes)
+     */
+    private static final int SLOT_TABLE_SIZE = 2048;
+
+    /**
+     * Expected read size (Two integers)
+     */
+    private static final int CDB_READ_SIZE = Integer.BYTES * 2;
+
+    /**
+     * Initial hash value
+     */
+    private static final int INITIAL_HASH = 5381;
 
     /**
      * The RandomAccessFile for the CDB file.
@@ -61,65 +77,29 @@ public class Cdb implements Iterable<CdbElement> {
     private RandomAccessFile cdbFile;
 
     /**
-     * The slot pointers, cached here for efficiency as we do not have
-     * mmap() to do it for us.  These entries are paired as (pos, len)
-     * tuples.
+     * The main pointers. These entries are paired as sub-table index/number
+     * of entries.
      */
-    private int[] slotTable;
-
-    /**
-     * The number of hash slots searched under this key.
-     */
-    private int hashSlotIndex = 0;
-
-    /**
-     * The hash value for the current key.
-     */
-    private int keyHash = 0;
-
-    /**
-     * The number of hash slots in the hash table for the current key.
-     */
-    private int hashSlotCount = 0;
-
-    /**
-     * The position of the hash table for the current key
-     */
-    private int hashPosition = 0;
-
-    /**
-     * The position of the current key in the slot.
-     */
-    private int keyPosition = 0;
+    private IntBuffer mainTable;
 
     /**
      * Creates an instance of the Cdb class and loads the given CDB
      * file.
      *
      * @param filepath The path to the CDB file to open.
-     * @throws java.io.IOException if the CDB file could not be
-     *                             opened.
+     * @throws {@link CdbException} if the CDB file could not be
+     * opened.
      */
-    public Cdb(String filepath) throws IOException {
+    public Cdb(Path filepath) throws CdbException {
         /* Open the CDB file. */
-        cdbFile = new RandomAccessFile(filepath, "r");
-
-        /* Read and parse the slot table.  We do not throw an exception
-         * if this fails; the file might empty, which is not an error. */
         try {
-            /* Create and parse the table. */
-            slotTable = new int[SLOT_TABLE_PAIRS * 2];
-
-            for (int i = 0; i < SLOT_TABLE_PAIRS; i++) {
-                int pos = readInt(cdbFile);
-
-                int len = readInt(cdbFile);
-
-                slotTable[i << 1] = pos;
-                slotTable[(i << 1) + 1] = len;
-            }
-        } catch (IOException ignored) {
-            slotTable = null;
+            cdbFile = new RandomAccessFile(filepath.toFile(), "r");
+            mainTable = cdbFile.getChannel()
+                    .map(FileChannel.MapMode.READ_ONLY, 0, SLOT_TABLE_SIZE)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .asIntBuffer();
+        } catch (IOException ex) {
+            throw new CdbException("Could not open the cdb file.", ex);
         }
     }
 
@@ -129,8 +109,11 @@ public class Cdb implements Iterable<CdbElement> {
     public final void close() {
         /* Close the CDB file. */
         try {
-            cdbFile.close();
-            cdbFile = null;
+            if (cdbFile != null) {
+                cdbFile.close();
+                cdbFile = null;
+                mainTable = null;
+            }
         } catch (IOException ignored) {
         }
     }
@@ -138,30 +121,46 @@ public class Cdb implements Iterable<CdbElement> {
     /**
      * Finds the first record stored under the given key.
      *
-     * @param key The key to search for.
+     * @param byteKey The key to search for.
      * @return The record store under the given key, or
      * <code>null</code> if no record with that key could be found.
      */
-    public final synchronized byte[] find(byte[] key) {
-        findinit();
-        return findnext(key);
+    public final synchronized byte[] find(byte[] byteKey) {
+        Key key = new Key(byteKey);
+        List<Integer> recordOffsets;
+        try {
+            recordOffsets = initFind(key);
+        } catch (IOException ex) {
+            // FIXME change it into a CdbException
+            throw new CdbException("Could not get the record offsets.", ex);
+        }
+        byte[] record = null;
+        if (!recordOffsets.isEmpty()) {
+            record = readRecord(key, recordOffsets.get(0));
+        }
+        return record;
     }
 
     /**
      * Finds all the records for the given key.
      *
-     * @param key The key to search for.
-     * @return The record store under the given key, or
-     * <code>null</code> if no record with that key could be found.
+     * @param byteKey The key to search for.
+     * @return The records stored under the given key, or
+     * an empty list if no records with that key could be found.
      */
-    public final synchronized List<byte[]> findall(byte[] key) {
-        findinit();
-        List<byte[]> values = new ArrayList<>();
-        byte[] value;
-        while ((value = findnext(key)) != null) {
-            values.add(value);
+    public final synchronized List<byte[]> findAll(byte[] byteKey) {
+        final Key key = new Key(byteKey);
+        List<Integer> recordOffsets;
+        try {
+            recordOffsets = initFind(key);
+        } catch (IOException ex) {
+            // FIXME change it into a CdbException
+            throw new CdbException("Could not get the record offsets.", ex);
         }
-        return values;
+        return recordOffsets.stream()
+                .map(ro -> readRecord(key, ro))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toUnmodifiableList());
     }
 
     /**
@@ -172,155 +171,184 @@ public class Cdb implements Iterable<CdbElement> {
         return new CdbIterator(cdbFile);
     }
 
-    /**
-     * Computes and returns the hash value for the given key.
-     *
-     * @param key The key to compute the hash value for.
-     * @return The hash value of <code>key</code>.
-     */
-    static final int hash(byte[] key) {
-        /* Initialize the hash value. */
-        long h = 5381;
-
-        /* Add each byte to the hash value. */
-        for (byte b : key) {
-            // h = ((h << 5) + h) ^ key[i];
-            long k = (long)b & LONG_BYTE_MASK;
-            h = (((h << 5) + h) ^ k) & LONG_INT_MASK;
+    private List<Integer> initFind(Key key) throws IOException {
+        SubtableInfo subtableInfo = new SubtableInfo(key);
+        if (subtableInfo.hasEntries()) {
+            return getRecordOffsets(subtableInfo);
         }
-
-        /* Return the hash value. */
-        return (int) (h & LONG_INT_MASK);
+        return Collections.emptyList();
     }
 
-    /**
-     * Prepares the class to search for the given key.
-     */
-    private final void findinit() {
-        hashSlotIndex = 0;
+    private List<Integer> getRecordOffsets(SubtableInfo subtableInfo)
+            throws IOException {
+        List<Integer> offsets = new ArrayList<>();
+        ByteBuffer bb = ByteBuffer.allocate(CDB_READ_SIZE)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        FileChannel cdbChannel = cdbFile.getChannel();
+        int subtableOffset = subtableInfo.getOffset();
+        int entry = subtableInfo.getFirstEntry();
+        cdbFile.seek(subtableOffset + (entry << 3));
+        boolean done = false;
+        while (!done) {
+            if (CDB_READ_SIZE != cdbChannel.read(bb)) {
+                throw new CdbException("CDB record read issue");
+            }
+            IntBuffer ib = bb.flip().asIntBuffer();
+            int hash = ib.get();
+            int record = ib.get();
+            if (hash == subtableInfo.getKey().getHash()) {
+                if (record != 0) {
+                    offsets.add(record);
+                } else {
+                    done = true;
+                }
+            } else if (hash == 0) {
+                done = true;
+            }
+            if (++entry >= subtableInfo.getEntries()) {
+                entry = 0;
+                cdbFile.seek(subtableOffset);
+            }
+            bb.clear();
+        }
+        return offsets;
     }
 
-    /**
-     * Finds the next record stored under the given key.
-     *
-     * @param key The key to search for.
-     * @return The next record store under the given key, or
-     * <code>null</code> if no record with that key could be found.
-     */
-    private final synchronized byte[] findnext(byte[] key) {
-        /* There are no keys if we could not read the slot table. */
-		if (slotTable == null) {
-			return null;
-		}
-
-        /* Locate the hash entry if we have not yet done so. */
-        if (hashSlotIndex == 0) {
-            /* Get the hash value for the key. */
-            int u = hash(key);
-
-            /* Unpack the information for this record. */
-            int slot = u & 255;
-            hashSlotCount = slotTable[(slot << 1) + 1];
-			if (hashSlotCount == 0) {
-				return null;
-			}
-            hashPosition = slotTable[slot << 1];
-
-            /* Store the hash value. */
-            keyHash = u;
-
-            /* Locate the slot containing this key. */
-            u >>>= 8;
-            u %= hashSlotCount;
-            u <<= 3;
-            keyPosition = hashPosition + u;
-        }
-
-        /* Search all of the hash slots for this key. */
+    private byte[] readRecord(Key key, int recordOffset) {
+        byte[] record = null;
         try {
-            while (hashSlotIndex < hashSlotCount) {
-                /* Read the entry for this key from the hash slot. */
-                cdbFile.seek(keyPosition);
-
-                int h = readInt(cdbFile);
-                int pos = readInt(cdbFile);
-				if (pos == 0) {
-					return null;
-				}
-
-                /* Advance the loop count and key position.  Wrap the
-                 * key position around to the beginning of the hash slot
-                 * if we are at the end of the table. */
-                hashSlotIndex += 1;
-
-                keyPosition += 8;
-				if (keyPosition == (hashPosition + (hashSlotCount << 3))) {
-					keyPosition = hashPosition;
-				}
-
-                /* Ignore this entry if the hash values do not match. */
-				if (h != keyHash) {
-					continue;
-				}
-
-                /* Get the length of the key and data in this hash slot
-                 * entry. */
-                cdbFile.seek(pos);
-
-                int klen = readInt(cdbFile);
-				if (klen != key.length) {
-					continue;
-				}
-
-                int dlen = readInt(cdbFile);
-
-                /* Read the key stored in this entry and compare it to
-                 * the key we were given. */
-                boolean match = true;
-                byte[] k = new byte[klen];
-                cdbFile.readFully(k);
-                for (int i = 0; i < k.length; i++) {
-                    if (k[i] != key[i]) {
-                        match = false;
-                        break;
+            cdbFile.seek(recordOffset);
+            // read key and data length
+            ByteBuffer bb = ByteBuffer.allocate(CDB_READ_SIZE)
+                    .order(ByteOrder.LITTLE_ENDIAN);
+            FileChannel cdbChannel = cdbFile.getChannel();
+            if (CDB_READ_SIZE != cdbChannel.read(bb)) {
+                throw new CdbException("CDB record size read issue");
+            }
+            IntBuffer ib = bb.flip().asIntBuffer();
+            int keyLength = ib.get();
+            int dataLength = ib.get();
+            if (keyLength == key.getKey().length) {
+                bb.clear();
+                bb = ByteBuffer.allocate(keyLength);
+                if (keyLength != cdbChannel.read(bb)) {
+                    throw new CdbException("CDB record key read issue");
+                }
+                if (Arrays.equals(key.getKey(), bb.array())) {
+                    bb.clear();
+                    record = new byte[dataLength];
+                    bb = ByteBuffer.wrap(record);
+                    if (dataLength != cdbChannel.read(bb)) {
+                        throw new CdbException("CDB record data read issue");
                     }
                 }
-
-                /* No match; check the next slot. */
-				if (!match) {
-					continue;
-				}
-
-                /* The keys match, return the data. */
-                byte[] d = new byte[dlen];
-                cdbFile.readFully(d);
-                return d;
             }
-        } catch (IOException ignored) {
-            return null;
+        } catch (IOException ex) {
+            throw new CdbException("Exception while reading record", ex);
         }
-
-        /* No more data values for this key. */
-        return null;
+        return record;
     }
 
-    private int readInt(DataInput in) throws IOException {
-        return (in.readUnsignedByte() & INT_BYTE_MASK)
-                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 8)
-                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 16)
-                | ((in.readUnsignedByte() & INT_BYTE_MASK) << 24);
+    class Pair<S, T> {
+        public final S first;
+        public final T second;
+
+        public Pair(S first, T second) {
+            this.first = first;
+            this.second = second;
+        }
+    }
+
+    private class IntPair extends Pair<Integer, Integer> {
+        public IntPair(Integer first, Integer second) {
+            super(first, second);
+        }
+    }
+
+    static class Key {
+        private final byte[] key;
+        private final int hash;
+
+        public Key(byte[] key) {
+            this.key = key;
+            this.hash = hash(key);
+        }
+
+        public byte[] getKey() {
+            return Arrays.copyOf(key, key.length);
+        }
+
+        public int getHash() {
+            return hash;
+        }
+
+        /**
+         * Computes and returns the hash value for the given key.
+         *
+         * @param key The key to compute the hash value for.
+         * @return The hash value of {@code key}.
+         */
+        static int hash(byte[] key) {
+            int h = 5381;
+            for (byte b : key) {
+                int k = Byte.toUnsignedInt(b);
+                h = ((h << 5) + h) ^ k;
+            }
+            return h;
+        }
+    }
+
+    private class SubtableInfo {
+        private final Key key;
+        private final IntPair offsetEntries;
+
+        public SubtableInfo(Key key) {
+            this.key = key;
+
+            // Get sub table info
+            int tableSlot = key.getHash() & 0x00ff; // % 256
+            int[] subTableInfo = new int[2]; // subtable index +  number of entries
+            mainTable.duplicate().get(subTableInfo, tableSlot, 2);
+            this.offsetEntries = new IntPair(subTableInfo[0], subTableInfo[1]);
+        }
+
+        public Key getKey() {
+            return key;
+        }
+
+        public int getOffset() {
+            return offsetEntries.first;
+        }
+
+        public int getEntries() {
+            return offsetEntries.second;
+        }
+
+        public int getFirstEntry() {
+            if (!hasEntries()) {
+                throw new IllegalStateException("No entries exist for key '" +
+                        new String(key.getKey()) + "'");
+            }
+            return (key.getHash() >>> 8) % offsetEntries.second;
+        }
+
+        public boolean hasEntries() {
+            return offsetEntries.second != 0;
+        }
     }
 
     private class CdbIterator implements Iterator<CdbElement> {
         private final RandomAccessFile iteratorFile;
+        private final FileChannel iteratorChannel;
         private final int endOfData;
         private long lastOffset;
 
         public CdbIterator(RandomAccessFile raf) {
             try {
                 iteratorFile = raf;
+                iteratorChannel = raf.getChannel();
                 iteratorFile.seek(0);
-                int tmpEod = readInt(iteratorFile);
+                int tmpEod = readInt(iteratorChannel);
                 /* Skip the rest of the hashtable. */
                 iteratorFile.seek(2048);
                 lastOffset = iteratorFile.getFilePointer();
@@ -344,8 +372,8 @@ public class Cdb implements Iterable<CdbElement> {
                 }
 
                 // read key/value lengths
-                int keyLength = readInt(iteratorFile);
-                int valueLength = readInt(iteratorFile);
+                int keyLength = readInt(iteratorChannel);
+                int valueLength = readInt(iteratorChannel);
 
                 // read the key
                 byte[] key = new byte[keyLength];
@@ -364,5 +392,14 @@ public class Cdb implements Iterable<CdbElement> {
                 throw new CdbException("Iterator next failure", ioe);
             }
         }
+    }
+
+    private int readInt(FileChannel fc) throws IOException {
+        ByteBuffer bb = ByteBuffer.allocate(Integer.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        if (fc.read(bb) != Integer.BYTES) {
+            throw new IOException("Unable to read integer.");
+        }
+        return bb.asIntBuffer().get();
     }
 }
