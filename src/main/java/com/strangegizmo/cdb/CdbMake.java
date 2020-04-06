@@ -134,7 +134,7 @@ public final class CdbMake {
 
 
         /* Add the hash pointer to our list. */
-        int hash = Cdb.hash(key);
+        int hash = hash(key);
         hashPointers_.add(new CdbHashPointer(hash, pos_));
 
         /* Add this item to the count. */
@@ -469,5 +469,32 @@ public final class CdbMake {
             this.hash = hash;
             this.pos = pos;
         }
+    }
+
+    /**
+     * Computes and returns the hash value for the given key.
+     *
+     * @param key The key to compute the hash value for.
+     * @return The hash value of <code>key</code>.
+     */
+    private static final int hash(byte[] key) {
+        /* Initialize the hash value. */
+        long h = 5381;
+
+        /* Add each byte to the hash value. */
+        for (int i = 0; i < key.length; i++ ) {
+//          h = ((h << 5) + h) ^ key[i];
+            long l = h << 5;
+            h += (l & 0x00000000ffffffffL);
+            h = (h & 0x00000000ffffffffL);
+
+            int k = key[i];
+            k = (k + 0x100) & 0xff;
+
+            h = h ^ k;
+        }
+
+        /* Return the hash value. */
+        return (int)(h & 0x00000000ffffffffL);
     }
 }
