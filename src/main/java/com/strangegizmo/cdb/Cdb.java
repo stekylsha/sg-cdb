@@ -123,7 +123,7 @@ public class Cdb implements Iterable<CdbElement> {
      *
      * @param byteKey The key to search for.
      * @return The record store under the given key, or
-     * <code>null</code> if no record with that key could be found.
+     * {@code null} if no record with that key could be found.
      */
     public final synchronized byte[] find(byte[] byteKey) {
         Key key = new Key(byteKey);
@@ -154,7 +154,6 @@ public class Cdb implements Iterable<CdbElement> {
         try {
             recordOffsets = initFind(key);
         } catch (IOException ex) {
-            // FIXME change it into a CdbException
             throw new CdbException("Could not get the record offsets.", ex);
         }
         return recordOffsets.stream()
@@ -184,28 +183,25 @@ public class Cdb implements Iterable<CdbElement> {
         List<Integer> offsets = new ArrayList<>();
         ByteBuffer bb = ByteBuffer.allocate(CDB_READ_SIZE)
                 .order(ByteOrder.LITTLE_ENDIAN);
-        FileChannel cdbChannel = cdbFile.getChannel();
+        int keyHash = subtableInfo.getKey().getHash();
         int subtableOffset = subtableInfo.getOffset();
         int entry = subtableInfo.getFirstEntry();
         cdbFile.seek(subtableOffset + (entry << 3));
+        FileChannel cdbChannel = cdbFile.getChannel();
         boolean done = false;
         while (!done) {
-            if (CDB_READ_SIZE != cdbChannel.read(bb)) {
+            if (cdbChannel.read(bb) != CDB_READ_SIZE) {
                 throw new CdbException("CDB record read issue");
             }
             IntBuffer ib = bb.flip().asIntBuffer();
             int hash = ib.get();
             int record = ib.get();
-            if (hash == subtableInfo.getKey().getHash()) {
-                if (record != 0) {
-                    offsets.add(record);
-                } else {
-                    done = true;
-                }
-            } else if (hash == 0) {
+            if (hash == 0 || record == 0) {
                 done = true;
+            } else if (hash == keyHash) {
+               offsets.add(record);
             }
-            if (++entry >= subtableInfo.getEntries()) {
+            if (!done && ++entry >= subtableInfo.getEntries()) {
                 entry = 0;
                 cdbFile.seek(subtableOffset);
             }
@@ -272,6 +268,7 @@ public class Cdb implements Iterable<CdbElement> {
         public Key(byte[] key) {
             this.key = key;
             this.hash = hash(key);
+            int tmpHash = CdbMake.hash(key);
         }
 
         public byte[] getKey() {
@@ -283,13 +280,14 @@ public class Cdb implements Iterable<CdbElement> {
         }
 
         /**
-         * Computes and returns the hash value for the given key.
+         * Computes and returns the hash value for the given key.  Hash function
+         * as defined by the spec is {@code h = ((h << 5) + h) ^ c}.
          *
          * @param key The key to compute the hash value for.
          * @return The hash value of {@code key}.
          */
         static int hash(byte[] key) {
-            int h = 5381;
+            int h = INITIAL_HASH;
             for (byte b : key) {
                 int k = Byte.toUnsignedInt(b);
                 h = ((h << 5) + h) ^ k;
@@ -306,9 +304,11 @@ public class Cdb implements Iterable<CdbElement> {
             this.key = key;
 
             // Get sub table info
-            int tableSlot = key.getHash() & 0x00ff; // % 256
+            int tableSlot = (key.getHash() & 0x00ff) << 1; // (h % 256) * 2 entries per slot
             int[] subTableInfo = new int[2]; // subtable index +  number of entries
-            mainTable.duplicate().get(subTableInfo, tableSlot, 2);
+            mainTable.position(tableSlot)
+                    .duplicate()
+                    .get(subTableInfo);
             this.offsetEntries = new IntPair(subTableInfo[0], subTableInfo[1]);
         }
 
@@ -350,7 +350,7 @@ public class Cdb implements Iterable<CdbElement> {
                 iteratorFile.seek(0);
                 int tmpEod = readInt(iteratorChannel);
                 /* Skip the rest of the hashtable. */
-                iteratorFile.seek(2048);
+                iteratorFile.seek(SLOT_TABLE_SIZE);
                 lastOffset = iteratorFile.getFilePointer();
                 endOfData = tmpEod;
             } catch (IOException ioe) {
@@ -400,6 +400,7 @@ public class Cdb implements Iterable<CdbElement> {
         if (fc.read(bb) != Integer.BYTES) {
             throw new IOException("Unable to read integer.");
         }
+        bb.flip();
         return bb.asIntBuffer().get();
     }
 }

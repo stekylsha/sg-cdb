@@ -477,7 +477,7 @@ public final class CdbMake {
      * @param key The key to compute the hash value for.
      * @return The hash value of <code>key</code>.
      */
-    private static final int hash(byte[] key) {
+     static final int hash(byte[] key) {
         /* Initialize the hash value. */
         long h = 5381;
 
