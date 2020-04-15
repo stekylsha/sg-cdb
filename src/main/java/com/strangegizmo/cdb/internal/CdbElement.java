@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-package com.strangegizmo.cdb;
+package com.strangegizmo.cdb.internal;
 
 /**
  * CdbElement represents a single element in a constant database.

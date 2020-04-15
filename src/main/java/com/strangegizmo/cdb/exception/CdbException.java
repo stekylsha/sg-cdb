@@ -1,5 +1,10 @@
-package com.strangegizmo.cdb;
+package com.strangegizmo.cdb.exception;
 
+/**
+ * General roll-up exception for when things go wrong in/with CDB. The class
+ * intentionally extends {@link RuntimeException}, so that the methods can be
+ * used in lambdas.
+ */
 public class CdbException extends RuntimeException {
 
     public CdbException() {

@@ -47,6 +47,16 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.strangegizmo.cdb.exception.CdbException;
+import com.strangegizmo.cdb.exception.CdbFormatException;
+import com.strangegizmo.cdb.exception.CdbIOException;
+import com.strangegizmo.cdb.exception.CdbStateException;
+import com.strangegizmo.cdb.internal.CdbElement;
+import com.strangegizmo.cdb.internal.IntPair;
+import com.strangegizmo.cdb.internal.Key;
+import com.strangegizmo.cdb.internal.SlotTableInfo;
+import com.strangegizmo.cdb.model.ByteArrayPair;
+
 /**
  * Cdb implements a Java interface to D.&nbsp;J.&nbsp;Bernstein's CDB
  * database.
@@ -54,12 +64,12 @@ import java.util.stream.Collectors;
  * @author Michael Alyn Miller <malyn@strangeGizmo.com>
  * @version 1.0.3
  */
-public class Cdb implements Iterable<CdbElement> {
+public class Cdb implements Iterable<ByteArrayPair> {
 
     /**
      * 256 entries * (4 bytes + 4 bytes)
      */
-    private static final int SLOT_TABLE_SIZE = 2048;
+    private static final int MAIN_TABLE_SIZE = 2048;
 
     /**
      * Expected read size (Two integers)
@@ -67,20 +77,26 @@ public class Cdb implements Iterable<CdbElement> {
     private static final int CDB_READ_SIZE = Integer.BYTES * 2;
 
     /**
-     * Initial hash value
-     */
-    private static final int INITIAL_HASH = 5381;
-
-    /**
      * The RandomAccessFile for the CDB file.
      */
     private RandomAccessFile cdbFile;
+
+    /**
+     * The FileChannel for the CDB file.
+     */
+    private FileChannel cdbFileChannel;
 
     /**
      * The main pointers. These entries are paired as sub-table index/number
      * of entries.
      */
     private IntBuffer mainTable;
+
+    /**
+     * Common buffer for reading two integers.
+     */
+    private final ByteBuffer intPairBuffer = ByteBuffer.allocate(Integer.BYTES * 2)
+            .order(ByteOrder.LITTLE_ENDIAN);
 
     /**
      * Creates an instance of the Cdb class and loads the given CDB
@@ -94,8 +110,9 @@ public class Cdb implements Iterable<CdbElement> {
         /* Open the CDB file. */
         try {
             cdbFile = new RandomAccessFile(filepath.toFile(), "r");
-            mainTable = cdbFile.getChannel()
-                    .map(FileChannel.MapMode.READ_ONLY, 0, SLOT_TABLE_SIZE)
+            cdbFileChannel = cdbFile.getChannel();
+            mainTable = cdbFileChannel
+                    .map(FileChannel.MapMode.READ_ONLY, 0, MAIN_TABLE_SIZE)
                     .order(ByteOrder.LITTLE_ENDIAN)
                     .asIntBuffer();
         } catch (IOException ex) {
@@ -112,9 +129,11 @@ public class Cdb implements Iterable<CdbElement> {
             if (cdbFile != null) {
                 cdbFile.close();
                 cdbFile = null;
+                cdbFileChannel = null;
                 mainTable = null;
             }
         } catch (IOException ignored) {
+            // Not really anything to do here.
         }
     }
 
@@ -125,14 +144,14 @@ public class Cdb implements Iterable<CdbElement> {
      * @return The record store under the given key, or
      * {@code null} if no record with that key could be found.
      */
-    public final synchronized byte[] find(byte[] byteKey) {
+    public final byte[] find(byte[] byteKey) {
         Key key = new Key(byteKey);
-        List<Integer> recordOffsets;
+        List<Long> recordOffsets;
         try {
             recordOffsets = initFind(key);
         } catch (IOException ex) {
             // FIXME change it into a CdbException
-            throw new CdbException("Could not get the record offsets.", ex);
+            throw new CdbIOException("Could not get the record offsets.", ex);
         }
         byte[] record = null;
         if (!recordOffsets.isEmpty()) {
@@ -148,13 +167,13 @@ public class Cdb implements Iterable<CdbElement> {
      * @return The records stored under the given key, or
      * an empty list if no records with that key could be found.
      */
-    public final synchronized List<byte[]> findAll(byte[] byteKey) {
+    public final List<byte[]> findAll(byte[] byteKey) {
         final Key key = new Key(byteKey);
-        List<Integer> recordOffsets;
+        List<Long> recordOffsets;
         try {
             recordOffsets = initFind(key);
         } catch (IOException ex) {
-            throw new CdbException("Could not get the record offsets.", ex);
+            throw new CdbIOException("Could not get the record offsets.", ex);
         }
         return recordOffsets.stream()
                 .map(ro -> readRecord(key, ro))
@@ -163,198 +182,153 @@ public class Cdb implements Iterable<CdbElement> {
     }
 
     /**
+     * Finds the records for the given key as an iterator.  This is a lot like
+     * the spec's cdb_findstart/cdb_find, but as an iterator.
+     *
+     * @param byteKey The key to search for.
+     * @return An iterator for the records for the key.
+     */
+    public Iterator<byte[]> iterator(byte[] byteKey) {
+        return new KeyIterator(new Key(byteKey));
+    }
+
+    /**
      * @inheritDoc
      */
     @Override
-    public Iterator<CdbElement> iterator() {
-        return new CdbIterator(cdbFile);
+    public Iterator<ByteArrayPair> iterator() {
+        return new CdbIterator();
     }
 
-    private List<Integer> initFind(Key key) throws IOException {
-        SubtableInfo subtableInfo = new SubtableInfo(key);
-        if (subtableInfo.hasEntries()) {
-            return getRecordOffsets(subtableInfo);
+    private List<Long> initFind(Key key) throws IOException {
+        SlotTableInfo slotTableInfo = new SlotTableInfo(mainTable, key);
+        if (slotTableInfo.hasEntries()) {
+            return getRecordOffsets(slotTableInfo);
         }
         return Collections.emptyList();
     }
 
-    private List<Integer> getRecordOffsets(SubtableInfo subtableInfo)
+    private List<Long> getRecordOffsets(SlotTableInfo slotTableInfo)
             throws IOException {
-        List<Integer> offsets = new ArrayList<>();
-        ByteBuffer bb = ByteBuffer.allocate(CDB_READ_SIZE)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        int keyHash = subtableInfo.getKey().getHash();
-        int subtableOffset = subtableInfo.getOffset();
-        int entry = subtableInfo.getFirstEntry();
-        cdbFile.seek(subtableOffset + (entry << 3));
-        FileChannel cdbChannel = cdbFile.getChannel();
-        boolean done = false;
-        while (!done) {
-            if (cdbChannel.read(bb) != CDB_READ_SIZE) {
-                throw new CdbException("CDB record read issue");
+        List<Long> offsets = new ArrayList<>();
+        int keyHash = slotTableInfo.getKey().hash;
+        long subtableOffset = slotTableInfo.offset();
+        long entry = slotTableInfo.firstEntry();
+        synchronized (cdbFile) {
+            cdbFile.seek(subtableOffset + (entry << 3));
+            boolean done = false;
+            while (!done) {
+                // pair.first -> hash, pair.second -> record offset
+                IntPair pair = readIntPair(cdbFileChannel);
+                if (pair.first == 0 || pair.second == 0) {
+                    done = true;
+                } else if (pair.first == keyHash) {
+                    offsets.add(Integer.toUnsignedLong(pair.second));
+                }
+                if (!done && ++entry >= slotTableInfo.entries()) {
+                    entry = 0;
+                    cdbFile.seek(subtableOffset);
+                }
             }
-            IntBuffer ib = bb.flip().asIntBuffer();
-            int hash = ib.get();
-            int record = ib.get();
-            if (hash == 0 || record == 0) {
-                done = true;
-            } else if (hash == keyHash) {
-               offsets.add(record);
-            }
-            if (!done && ++entry >= subtableInfo.getEntries()) {
-                entry = 0;
-                cdbFile.seek(subtableOffset);
-            }
-            bb.clear();
         }
         return offsets;
     }
 
-    private byte[] readRecord(Key key, int recordOffset) {
+    private byte[] readRecord(Key key, long recordOffset) {
         byte[] record = null;
         try {
-            cdbFile.seek(recordOffset);
-            // read key and data length
-            ByteBuffer bb = ByteBuffer.allocate(CDB_READ_SIZE)
-                    .order(ByteOrder.LITTLE_ENDIAN);
-            FileChannel cdbChannel = cdbFile.getChannel();
-            if (CDB_READ_SIZE != cdbChannel.read(bb)) {
-                throw new CdbException("CDB record size read issue");
-            }
-            IntBuffer ib = bb.flip().asIntBuffer();
-            int keyLength = ib.get();
-            int dataLength = ib.get();
-            if (keyLength == key.getKey().length) {
-                bb.clear();
-                bb = ByteBuffer.allocate(keyLength);
-                if (keyLength != cdbChannel.read(bb)) {
-                    throw new CdbException("CDB record key read issue");
-                }
-                if (Arrays.equals(key.getKey(), bb.array())) {
-                    bb.clear();
-                    record = new byte[dataLength];
-                    bb = ByteBuffer.wrap(record);
-                    if (dataLength != cdbChannel.read(bb)) {
-                        throw new CdbException("CDB record data read issue");
+            synchronized (cdbFile) {
+                cdbFile.seek(recordOffset);
+                // read key and data length
+                // pair.first -> key length, pair.second -> data length
+                IntPair pair = readIntPair(cdbFileChannel);
+                if (pair.first == key.key.length) {
+                    ByteBuffer bb = ByteBuffer.allocate(pair.first);
+                    if (cdbFileChannel.read(bb) != pair.first) {
+                        throw new CdbFormatException("CDB record key read issue");
+                    }
+                    if (Arrays.equals(key.key, bb.array())) {
+                        bb.clear();
+                        record = new byte[pair.second];
+                        bb = ByteBuffer.wrap(record);
+                        if (cdbFileChannel.read(bb) != pair.second) {
+                            throw new CdbFormatException("CDB record data read issue");
+                        }
                     }
                 }
             }
         } catch (IOException ex) {
-            throw new CdbException("Exception while reading record", ex);
+            throw new CdbIOException("Exception while reading record", ex);
         }
         return record;
     }
 
-    class Pair<S, T> {
-        public final S first;
-        public final T second;
-
-        public Pair(S first, T second) {
-            this.first = first;
-            this.second = second;
-        }
-    }
-
-    private class IntPair extends Pair<Integer, Integer> {
-        public IntPair(Integer first, Integer second) {
-            super(first, second);
-        }
-    }
-
-    static class Key {
-        private final byte[] key;
-        private final int hash;
-
-        public Key(byte[] key) {
-            this.key = key;
-            this.hash = hash(key);
-            int tmpHash = CdbMake.hash(key);
-        }
-
-        public byte[] getKey() {
-            return Arrays.copyOf(key, key.length);
-        }
-
-        public int getHash() {
-            return hash;
-        }
-
-        /**
-         * Computes and returns the hash value for the given key.  Hash function
-         * as defined by the spec is {@code h = ((h << 5) + h) ^ c}.
-         *
-         * @param key The key to compute the hash value for.
-         * @return The hash value of {@code key}.
-         */
-        static int hash(byte[] key) {
-            int h = INITIAL_HASH;
-            for (byte b : key) {
-                int k = Byte.toUnsignedInt(b);
-                h = ((h << 5) + h) ^ k;
+    private IntPair readIntPair(FileChannel channel) throws IOException {
+        IntPair pair = null;
+        synchronized (intPairBuffer) {
+            if (CDB_READ_SIZE != channel.read(intPairBuffer)) {
+                throw new CdbFormatException("CDB int pair read issue");
             }
-            return h;
+            IntBuffer ib = intPairBuffer.flip().asIntBuffer();
+            pair = new IntPair(ib.get(), ib.get());
+            intPairBuffer.clear();
         }
+        return pair;
     }
 
-    private class SubtableInfo {
+    private class KeyIterator implements Iterator<byte[]> {
         private final Key key;
-        private final IntPair offsetEntries;
+        private final Iterator<Long> recordOffsetIterator;
+        private byte[] nextRecord;
 
-        public SubtableInfo(Key key) {
-            this.key = key;
-
-            // Get sub table info
-            int tableSlot = (key.getHash() & 0x00ff) << 1; // (h % 256) * 2 entries per slot
-            int[] subTableInfo = new int[2]; // subtable index +  number of entries
-            mainTable.position(tableSlot)
-                    .duplicate()
-                    .get(subTableInfo);
-            this.offsetEntries = new IntPair(subTableInfo[0], subTableInfo[1]);
-        }
-
-        public Key getKey() {
-            return key;
-        }
-
-        public int getOffset() {
-            return offsetEntries.first;
-        }
-
-        public int getEntries() {
-            return offsetEntries.second;
-        }
-
-        public int getFirstEntry() {
-            if (!hasEntries()) {
-                throw new IllegalStateException("No entries exist for key '" +
-                        new String(key.getKey()) + "'");
+        public KeyIterator(Key key) {
+            try {
+                this.key = key;
+                recordOffsetIterator = initFind(key).iterator();
+                if (recordOffsetIterator.hasNext()) {
+                    nextRecord = readRecord(key, recordOffsetIterator.next());
+                }
+            } catch (IOException ex) {
+                throw new CdbIOException("Problem creating key iterator for '" +
+                        new String(key.key) + "'", ex);
             }
-            return (key.getHash() >>> 8) % offsetEntries.second;
         }
 
-        public boolean hasEntries() {
-            return offsetEntries.second != 0;
+        @Override
+        public boolean hasNext() {
+            return nextRecord != null;
+        }
+
+        @Override
+        public byte[] next() {
+            byte[] tmpNextRecord = nextRecord;
+            if (nextRecord == null) {
+                throw new CdbStateException("KeyIterator has no more records.");
+            } else if (!recordOffsetIterator.hasNext()) {
+                nextRecord = null;
+            } else {
+                nextRecord = readRecord(key, recordOffsetIterator.next());
+            }
+            return tmpNextRecord;
         }
     }
 
-    private class CdbIterator implements Iterator<CdbElement> {
-        private final RandomAccessFile iteratorFile;
-        private final FileChannel iteratorChannel;
+    private class CdbIterator implements Iterator<ByteArrayPair> {
         private final int endOfData;
         private long lastOffset;
 
-        public CdbIterator(RandomAccessFile raf) {
+        public CdbIterator() {
             try {
-                iteratorFile = raf;
-                iteratorChannel = raf.getChannel();
-                iteratorFile.seek(0);
-                int tmpEod = readInt(iteratorChannel);
-                /* Skip the rest of the hashtable. */
-                iteratorFile.seek(SLOT_TABLE_SIZE);
-                lastOffset = iteratorFile.getFilePointer();
-                endOfData = tmpEod;
+                synchronized (cdbFile) {
+                    cdbFile.seek(0);
+                    IntPair tmpEod = readIntPair(cdbFileChannel);
+                    /* Skip the rest of the hashtable. */
+                    cdbFile.seek(MAIN_TABLE_SIZE);
+                    lastOffset = cdbFile.getFilePointer();
+                    endOfData = tmpEod.first;
+                }
             } catch (IOException ioe) {
-                throw new CdbException("Iterator creation failure", ioe);
+                throw new CdbException("Problem creating cdb iterator");
             }
         }
 
@@ -364,43 +338,33 @@ public class Cdb implements Iterable<CdbElement> {
         }
 
         @Override
-        public CdbElement next() {
+        public ByteArrayPair next() {
             try {
-                // make sure to pick up where we left off
-                if (lastOffset != iteratorFile.getFilePointer()) {
-                    iteratorFile.seek(lastOffset);
-                }
+                synchronized (cdbFile) {
+                    // make sure to pick up where we left off
+                    if (lastOffset != cdbFile.getFilePointer()) {
+                        cdbFile.seek(lastOffset);
+                    }
 
-                // read key/value lengths
-                int keyLength = readInt(iteratorChannel);
-                int valueLength = readInt(iteratorChannel);
+                    // read key/value lengths
+                    // pair.first -> key length, pair.second -> data length
+                    IntPair lengths = readIntPair(cdbFileChannel);
 
-                // read the key
-                byte[] key = new byte[keyLength];
-                if (iteratorFile.read(key) != keyLength) {
-                    throw new IOException("unrecognizable cdb format");
-                }
-                // read the value
-                byte[] value = new byte[valueLength];
-                if (iteratorFile.read(value) != valueLength) {
-                    throw new IOException("unrecognizable cdb format");
-                }
+                    // read the record
+                    ByteBuffer[] record = new ByteBuffer[] {
+                            ByteBuffer.wrap(new byte[lengths.first]),
+                            ByteBuffer.wrap(new byte[lengths.second])
+                    };
+                    if (cdbFileChannel.read(record) != (lengths.first + lengths.second)) {
+                        throw new IOException("unrecognizable cdb format");
+                    }
 
-                lastOffset = iteratorFile.getFilePointer();
-                return new CdbElement(key, value);
+                    lastOffset = cdbFile.getFilePointer();
+                    return new ByteArrayPair(record[0].array(), record[1].array());
+                }
             } catch (IOException ioe) {
                 throw new CdbException("Iterator next failure", ioe);
             }
         }
-    }
-
-    private int readInt(FileChannel fc) throws IOException {
-        ByteBuffer bb = ByteBuffer.allocate(Integer.BYTES)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        if (fc.read(bb) != Integer.BYTES) {
-            throw new IOException("Unable to read integer.");
-        }
-        bb.flip();
-        return bb.asIntBuffer().get();
     }
 }
