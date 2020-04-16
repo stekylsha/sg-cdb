@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'sg-cdb'
-version '1.0.5-SNAPSHOT'
+version '1.1.0-SNAPSHOT'
 
 compileJava {
     options.compilerArgs.addAll(['--release', '11', '-Xlint:unchecked', '-Xlint:deprecation'])
