@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'java-library'
+    id 'org.javamodularity.moduleplugin' version '1.6.0'
+    id 'maven-publish'
+}
+
+group 'sg-cdb'
+version '1.1.0-SNAPSHOT'
+
+compileJava {
+    options.compilerArgs.addAll(['--release', '11', '-Xlint:unchecked', '-Xlint:deprecation'])
+}
+
+repositories {
+    jcenter()
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.5.2'
+
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.5.2'
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = project.group
+            artifactId = project.name
+            version = project.version
+
+            from components.java
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+}

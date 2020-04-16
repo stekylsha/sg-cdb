@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-package com.strangegizmo.cdb;
+package com.strangegizmo.cdb.internal;
 
 /**
  * CdbElement represents a single element in a constant database.
@@ -40,10 +40,10 @@ package com.strangegizmo.cdb;
  */
 public final class CdbElement {
 	/** The key value for this element. */
-	private byte[] key_ = null;
+	private final byte[] key;
 
 	/** The data value for this element. */
-	private byte[] data_ = null;
+	private final byte[] data;
 
 
 	/**
@@ -54,8 +54,8 @@ public final class CdbElement {
 	 * @param data The data value for this element.
 	 */
 	public CdbElement(byte[] key, byte[] data) {
-		key_ = key;
-		data_ = data;
+		this.key = key;
+		this.data = data;
 	}
 
 
@@ -65,7 +65,7 @@ public final class CdbElement {
 	 * @return This element's key.
 	 */
 	public final byte[] getKey() {
-		return key_;
+		return key;
 	}
 
 	/**
@@ -74,6 +74,17 @@ public final class CdbElement {
 	 * @return This element's data.
 	 */
 	public final byte[] getData() {
-		return data_;
+		return data;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public String toString() {
+		return "CdbElement{" +
+				"key=" + new String(key) +
+				", data=" + new String(data) +
+				'}';
 	}
 }
