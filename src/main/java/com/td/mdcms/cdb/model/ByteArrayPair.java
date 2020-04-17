@@ -1,4 +1,8 @@
-package com.strangegizmo.cdb.model;
+/*
+ * Copyright (C) 2019 by Teradata Corporation. All Rights Reserved. TERADATA CORPORATION
+ * CONFIDENTIAL AND TRADE SECRET
+ */
+package com.td.mdcms.cdb.model;
 
 import java.util.Arrays;
 

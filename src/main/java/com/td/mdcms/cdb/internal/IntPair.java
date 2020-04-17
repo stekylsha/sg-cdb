@@ -1,6 +1,10 @@
-package com.strangegizmo.cdb.internal;
+/*
+ * Copyright (C) 2019 by Teradata Corporation. All Rights Reserved. TERADATA CORPORATION
+ * CONFIDENTIAL AND TRADE SECRET
+ */
+package com.td.mdcms.cdb.internal;
 
-import com.strangegizmo.cdb.model.Pair;
+import com.td.mdcms.cdb.model.Pair;
 
 /**
  * Specific {@link Pair} for two integers, since that is used a <em>lot</em>.

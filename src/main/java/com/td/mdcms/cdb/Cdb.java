@@ -1,36 +1,8 @@
 /*
- * Copyright (c) 2000-2001, Michael Alyn Miller <malyn@strangeGizmo.com>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice unmodified, this list of conditions, and the following
- *    disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of Michael Alyn Miller nor the names of the
- *    contributors to this software may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * Copyright (C) 2019 by Teradata Corporation. All Rights Reserved. TERADATA CORPORATION
+ * CONFIDENTIAL AND TRADE SECRET
  */
-
-package com.strangegizmo.cdb;
+package com.td.mdcms.cdb;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -47,15 +19,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import com.strangegizmo.cdb.exception.CdbException;
-import com.strangegizmo.cdb.exception.CdbFormatException;
-import com.strangegizmo.cdb.exception.CdbIOException;
-import com.strangegizmo.cdb.exception.CdbStateException;
-import com.strangegizmo.cdb.internal.CdbElement;
-import com.strangegizmo.cdb.internal.IntPair;
-import com.strangegizmo.cdb.internal.Key;
-import com.strangegizmo.cdb.internal.SlotTableInfo;
-import com.strangegizmo.cdb.model.ByteArrayPair;
+import com.td.mdcms.cdb.exception.CdbException;
+import com.td.mdcms.cdb.exception.CdbFormatException;
+import com.td.mdcms.cdb.exception.CdbIOException;
+import com.td.mdcms.cdb.exception.CdbStateException;
+import com.td.mdcms.cdb.internal.CdbElement;
+import com.td.mdcms.cdb.internal.IntPair;
+import com.td.mdcms.cdb.internal.Key;
+import com.td.mdcms.cdb.internal.SlotTableInfo;
+import com.td.mdcms.cdb.model.ByteArrayPair;
 
 /**
  * Cdb implements a Java interface to D.&nbsp;J.&nbsp;Bernstein's CDB

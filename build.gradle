@@ -5,8 +5,8 @@ plugins {
     id 'maven-publish'
 }
 
-group 'sg-cdb'
-version '1.1.0-SNAPSHOT'
+group 'com.td.mdcms'
+version '1.0.0-SNAPSHOT'
 
 compileJava {
     options.compilerArgs.addAll(['--release', '11', '-Xlint:unchecked', '-Xlint:deprecation'])

@@ -1,7 +1,7 @@
-module sg.cdb {
+module com.td.mdcms.cdb {
     requires java.base;
 
-    exports com.strangegizmo.cdb;
-    exports com.strangegizmo.cdb.exception;
-    exports com.strangegizmo.cdb.model;
+    exports com.td.mdcms.cdb;
+    exports com.td.mdcms.cdb.exception;
+    exports com.td.mdcms.cdb.model;
 }

@@ -1,4 +1,8 @@
-package com.strangegizmo.cdb.exception;
+/*
+ * Copyright (C) 2019 by Teradata Corporation. All Rights Reserved. TERADATA CORPORATION
+ * CONFIDENTIAL AND TRADE SECRET
+ */
+package com.td.mdcms.cdb.exception;
 
 /**
  * General roll-up exception for when things go wrong in/with CDB. The class
