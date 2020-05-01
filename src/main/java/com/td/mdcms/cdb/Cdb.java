@@ -23,7 +23,6 @@ import com.td.mdcms.cdb.exception.CdbException;
 import com.td.mdcms.cdb.exception.CdbFormatException;
 import com.td.mdcms.cdb.exception.CdbIOException;
 import com.td.mdcms.cdb.exception.CdbStateException;
-import com.td.mdcms.cdb.internal.CdbElement;
 import com.td.mdcms.cdb.internal.IntPair;
 import com.td.mdcms.cdb.internal.Key;
 import com.td.mdcms.cdb.internal.SlotTableInfo;
@@ -75,7 +74,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * file.
      *
      * @param filepath The path to the CDB file to open.
-     * @throws {@link CdbException} if the CDB file could not be
+     * @throws CdbException if the CDB file could not be
      * opened.
      */
     public Cdb(Path filepath) throws CdbException {
@@ -176,7 +175,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * key are found.  The list may contain offsets for records that do not
      * match the key: the key must be compared with the record's key to ensure a
      * match.
-     * 
+     *
      * @param key The key to search for in the db.
      * @return The list of offsets, suitable for {@code seek}ing. The list may
      * be empty, but will never be null.
@@ -195,7 +194,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * that match.  The list includes all offsets that match the key, which is
      * not necessarily the list of matching records. This method always returns
      * a {@link List}, albeit an empty one if no offsets for the key are found.
-     * 
+     *
      * @param slotTableInfo The {@link SlotTableInfo} to search for in the db.
      * @return The list of offsets, suitable for {@code seek}ing. The list may
      * be empty, but will never be null.
@@ -232,7 +231,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * matches the record's key.  Because of how cdb stores the information, the
      * key must be checked against the record's key.  If the keys match, the
      * record's data is returned.  If not, it will return null.
-     * 
+     *
      * @param key The key of the desired record data.
      * @return The data value, if the keys match.  Null otherwise.
      * @throws CdbFormatException If the record data is not in the expected
@@ -272,13 +271,13 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * Read a pair of integer values.  This is a common structure in cdb files.
      * It is expected the position will be correct, and two integers in little
      * endian format will be read from that position.
-     * 
+     *
      * @param channel The {@link FileChannel} to read the data from.
      * @return The integers as an {@link IntPair}.
      * @throws IOException If a IO error occurs during the read.
      */
     private IntPair readIntPair(FileChannel channel) throws IOException {
-        IntPair pair = null;
+        IntPair pair;
         synchronized (intPairBuffer) {
             if (CDB_READ_SIZE != channel.read(intPairBuffer)) {
                 throw new CdbFormatException("CDB int pair read issue");

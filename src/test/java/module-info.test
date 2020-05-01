@@ -1,0 +1,4 @@
+--add-modules
+    org.mockito,mockito.junit.jupiter,org.junit.jupiter.api
+--add-reads
+    com.td.mdcms.cdb=org.mockito,mockito.junit.jupiter,org.junit.jupiter.api
