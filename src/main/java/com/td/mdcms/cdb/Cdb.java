@@ -79,7 +79,6 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * opened.
      */
     public Cdb(Path filepath) throws CdbException {
-        /* Open the CDB file. */
         try {
             cdbFile = new RandomAccessFile(filepath.toFile(), "r");
             cdbFileChannel = cdbFile.getChannel();
@@ -96,7 +95,6 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * Closes the CDB database.
      */
     public final void close() {
-        /* Close the CDB file. */
         try {
             if (cdbFile != null) {
                 cdbFile.close();
@@ -172,6 +170,18 @@ public class Cdb implements Iterable<ByteArrayPair> {
         return new CdbIterator();
     }
 
+    /**
+     * Initializes "find" by finding all the offsets in one pass. The method
+     * always returns a {@link List}, albeit an empty one if no offsets for the
+     * key are found.  The list may contain offsets for records that do not
+     * match the key: the key must be compared with the record's key to ensure a
+     * match.
+     * 
+     * @param key The key to search for in the db.
+     * @return The list of offsets, suitable for {@code seek}ing. The list may
+     * be empty, but will never be null.
+     * @throws IOException If the file access fails, the exception is passed on.
+     */
     private List<Long> initFind(Key key) throws IOException {
         SlotTableInfo slotTableInfo = new SlotTableInfo(mainTable, key);
         if (slotTableInfo.hasEntries()) {
@@ -180,6 +190,17 @@ public class Cdb implements Iterable<ByteArrayPair> {
         return Collections.emptyList();
     }
 
+    /**
+     * Given a {@link SlotTableInfo}, get all of the offsets in that slot table
+     * that match.  The list includes all offsets that match the key, which is
+     * not necessarily the list of matching records. This method always returns
+     * a {@link List}, albeit an empty one if no offsets for the key are found.
+     * 
+     * @param slotTableInfo The {@link SlotTableInfo} to search for in the db.
+     * @return The list of offsets, suitable for {@code seek}ing. The list may
+     * be empty, but will never be null.
+     * @throws IOException If the file access fails, the exception is passed on.
+     */
     private List<Long> getRecordOffsets(SlotTableInfo slotTableInfo)
             throws IOException {
         List<Long> offsets = new ArrayList<>();
@@ -206,6 +227,18 @@ public class Cdb implements Iterable<ByteArrayPair> {
         return offsets;
     }
 
+    /**
+     * For a given key and record offset, return the data/value iff the key
+     * matches the record's key.  Because of how cdb stores the information, the
+     * key must be checked against the record's key.  If the keys match, the
+     * record's data is returned.  If not, it will return null.
+     * 
+     * @param key The key of the desired record data.
+     * @return The data value, if the keys match.  Null otherwise.
+     * @throws CdbFormatException If the record data is not in the expected
+     * format.
+     * @throws CdbIOException If a IO error occurs during record access.
+     */
     private byte[] readRecord(Key key, long recordOffset) {
         byte[] record = null;
         try {
@@ -235,6 +268,15 @@ public class Cdb implements Iterable<ByteArrayPair> {
         return record;
     }
 
+    /**
+     * Read a pair of integer values.  This is a common structure in cdb files.
+     * It is expected the position will be correct, and two integers in little
+     * endian format will be read from that position.
+     * 
+     * @param channel The {@link FileChannel} to read the data from.
+     * @return The integers as an {@link IntPair}.
+     * @throws IOException If a IO error occurs during the read.
+     */
     private IntPair readIntPair(FileChannel channel) throws IOException {
         IntPair pair = null;
         synchronized (intPairBuffer) {
@@ -248,6 +290,12 @@ public class Cdb implements Iterable<ByteArrayPair> {
         return pair;
     }
 
+    /**
+     * Iterate over the values for a key.  This may be an empty set.  Because
+     * there may be a slot record but no matching data record, the next record
+     * is eagerly fetched so {@link #hasNext()} works properly.  If the data is
+     * large, this could be a Bad Thing.
+     */
     private class KeyIterator implements Iterator<byte[]> {
         private final Key key;
         private final Iterator<Long> recordOffsetIterator;
@@ -285,6 +333,9 @@ public class Cdb implements Iterable<ByteArrayPair> {
         }
     }
 
+    /**
+     * Iterate over the all values in the db.
+     */
     private class CdbIterator implements Iterator<ByteArrayPair> {
         private final int endOfData;
         private long lastOffset;
@@ -294,7 +345,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
                 synchronized (cdbFile) {
                     cdbFile.seek(0);
                     IntPair tmpEod = readIntPair(cdbFileChannel);
-                    /* Skip the rest of the hashtable. */
+                    // Skip the rest of the hashtable.
                     cdbFile.seek(MAIN_TABLE_SIZE);
                     lastOffset = cdbFile.getFilePointer();
                     endOfData = tmpEod.first;
