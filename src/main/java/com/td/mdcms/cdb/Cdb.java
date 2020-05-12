@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.td.mdcms.cdb.exception.CdbException;
 import com.td.mdcms.cdb.exception.CdbFormatException;
@@ -46,6 +47,11 @@ public class Cdb implements Iterable<ByteArrayPair> {
      * Expected read size (Two integers)
      */
     private static final int CDB_READ_SIZE = Integer.BYTES * 2;
+
+    /**
+     * As a shift value. It's going to be * 8.
+     */
+    private static final int CDB_READ_SHIFT = 3;
 
     /**
      * The RandomAccessFile for the CDB file.
@@ -207,7 +213,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
         long subtableOffset = slotTableInfo.offset();
         long entry = slotTableInfo.firstEntry();
         synchronized (cdbFile) {
-            cdbFile.seek(subtableOffset + (entry << 3));
+            cdbFileChannel.position(subtableOffset + (entry << CDB_READ_SHIFT));
             boolean done = false;
             while (!done) {
                 // pair.first -> hash, pair.second -> record offset
@@ -219,7 +225,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
                 }
                 if (!done && ++entry >= slotTableInfo.entries()) {
                     entry = 0;
-                    cdbFile.seek(subtableOffset);
+                    cdbFileChannel.position(subtableOffset);
                 }
             }
         }
@@ -242,7 +248,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
         byte[] record = null;
         try {
             synchronized (cdbFile) {
-                cdbFile.seek(recordOffset);
+                cdbFileChannel.position(recordOffset);
                 // read key and data length
                 // pair.first -> key length, pair.second -> data length
                 IntPair pair = readIntPair(cdbFileChannel);
@@ -279,8 +285,9 @@ public class Cdb implements Iterable<ByteArrayPair> {
     private IntPair readIntPair(FileChannel channel) throws IOException {
         IntPair pair;
         synchronized (intPairBuffer) {
-            if (CDB_READ_SIZE != channel.read(intPairBuffer)) {
-                throw new CdbFormatException("CDB int pair read issue");
+            int bytesRead = channel.read(intPairBuffer);
+            if (bytesRead != CDB_READ_SIZE) {
+                throw new CdbFormatException("CDB int pair read issue.  Wanted " + CDB_READ_SIZE + ", got " + bytesRead + ".");
             }
             IntBuffer ib = intPairBuffer.flip().asIntBuffer();
             pair = new IntPair(ib.get(), ib.get());
@@ -342,11 +349,11 @@ public class Cdb implements Iterable<ByteArrayPair> {
         public CdbIterator() {
             try {
                 synchronized (cdbFile) {
-                    cdbFile.seek(0);
+                    cdbFileChannel.position(0L);
                     IntPair tmpEod = readIntPair(cdbFileChannel);
                     // Skip the rest of the hashtable.
-                    cdbFile.seek(MAIN_TABLE_SIZE);
-                    lastOffset = cdbFile.getFilePointer();
+                    cdbFileChannel.position(MAIN_TABLE_SIZE);
+                    lastOffset = cdbFileChannel.position();
                     endOfData = tmpEod.first;
                 }
             } catch (IOException ioe) {
@@ -364,8 +371,8 @@ public class Cdb implements Iterable<ByteArrayPair> {
             try {
                 synchronized (cdbFile) {
                     // make sure to pick up where we left off
-                    if (lastOffset != cdbFile.getFilePointer()) {
-                        cdbFile.seek(lastOffset);
+                    if (lastOffset != cdbFileChannel.position()) {
+                        cdbFileChannel.position(lastOffset);
                     }
 
                     // read key/value lengths
@@ -381,7 +388,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
                         throw new IOException("unrecognizable cdb format");
                     }
 
-                    lastOffset = cdbFile.getFilePointer();
+                    lastOffset = cdbFileChannel.position();
                     return new ByteArrayPair(record[0].array(), record[1].array());
                 }
             } catch (IOException ioe) {
