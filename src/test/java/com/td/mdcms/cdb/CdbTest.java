@@ -16,6 +16,8 @@ import java.util.List;
 import com.td.mdcms.cdb.exception.CdbException;
 import com.td.mdcms.cdb.model.ByteArrayPair;
 import com.td.mdcms.cdb.model.Pair;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -34,6 +36,21 @@ public class CdbTest {
     private static final List<byte[]> TEST_DATA_MULTI_LIST =
             List.of(TEST_DATA_MULTI_ONE, TEST_DATA_MULTI_TWO);
 
+    private ThreadLocal<Path> cdbFilePath;
+
+    @BeforeEach
+    public void setUp() throws IOException {
+        cdbFilePath = new ThreadLocal<>();
+        cdbFilePath.set(Files.createTempFile(
+                TEST_CDB_PREFIX,
+                TEST_CDB_SUFFIX));
+    }
+
+    @AfterEach
+    public void cleanUp() throws IOException {
+        Files.deleteIfExists(cdbFilePath.get());
+    }
+
     /**
      * Everything works as expected.
      * @throws IOException If the setup fails.
@@ -48,7 +65,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -56,7 +72,7 @@ public class CdbTest {
      * The cdb file does not exist. A {@link CdbException} is expected.
      */
     @Test
-    public void testSadOpenNoFile() {
+    public void testSadOpenNoFile() throws IOException {
         assertThrows(CdbException.class, () -> {
             Cdb cdb = new Cdb(Path.of(
                 System.getProperty("java.io.tmpdir"),
@@ -79,7 +95,6 @@ public class CdbTest {
                 if (cdb != null) {
                     cdb.close();
                 }
-                Files.deleteIfExists(cdbFilePath);
             }
         });
     }
@@ -100,7 +115,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -120,7 +134,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -143,7 +156,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -163,7 +175,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -186,7 +197,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -208,7 +218,6 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
@@ -233,37 +242,33 @@ public class CdbTest {
             if (cdb != null) {
                 cdb.close();
             }
-            Files.deleteIfExists(cdbFilePath);
         }
     }
 
     private Path createEmptyCdb() throws IOException {
-        Pair<Path, CdbMake> pair = openCdbMake();
+        Pair<Path, CdbBuilder> pair = openCdbMake();
         return finishCdbMake(pair);
     }
 
     private Path createSimpleCdb() throws IOException {
-        Pair<Path, CdbMake> pair = openCdbMake();
+        Pair<Path, CdbBuilder> pair = openCdbMake();
         pair.second.add(TEST_KEY_SINGLE, TEST_DATA_SINGLE);
         return finishCdbMake(pair);
     }
 
     private Path createComplexCdb() throws IOException {
-        Pair<Path, CdbMake> pair = openCdbMake();
+        Pair<Path, CdbBuilder> pair = openCdbMake();
         pair.second.add(TEST_KEY_MULTI, TEST_DATA_MULTI_ONE);
         pair.second.add(TEST_KEY_MULTI, TEST_DATA_MULTI_TWO);
         return finishCdbMake(pair);
     }
 
-    private Pair<Path, CdbMake> openCdbMake() throws IOException {
-        Path cdbFilePath = Files.createTempFile(TEST_CDB_PREFIX, TEST_CDB_SUFFIX);
-        CdbMake cdbMake = new CdbMake();
-        cdbMake.start(cdbFilePath.toString());
-        return new Pair<>(cdbFilePath, cdbMake);
+    private Pair<Path, CdbBuilder> openCdbMake() throws IOException {
+        return new Pair<>(cdbFilePath.get(), new CdbBuilder(cdbFilePath.get()));
     }
 
-    private Path finishCdbMake(Pair<Path, CdbMake> pair) throws IOException {
-        pair.second.finish();
+    private Path finishCdbMake(Pair<Path, CdbBuilder> pair) {
+        pair.second.build();
         return pair.first;
     }
 
