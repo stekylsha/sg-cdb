@@ -9,12 +9,15 @@ import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -52,7 +55,7 @@ import com.td.mdcms.cdb.model.Pair;
  * Although it is more of a translator/bridge/adapter, it is named {@code Make}
  * for historical purposes.
  */
-public final class Make {
+public final class CdbBuilder {
 
     /**
      * 256 entries * (Integer.BYTES * 2)
@@ -91,26 +94,51 @@ public final class Make {
     private final ByteBuffer intPairBuffer = ByteBuffer.allocate(Integer.BYTES * 2)
             .order(ByteOrder.LITTLE_ENDIAN);
 
-    private Path cdbDumpPath;
-    private Path cdbTmpPath;
-    private Path cdbPath;
+    private RandomAccessFile cdbTmpFile;
+    private FileChannel cdbTmpFileChannel;
+
+    private final Path cdbPath;
+    private final Path cdbTmpPath;
+    private final Path cdbDumpPath;
+
+    private Map<Integer, List<Pair<Key, Long>>> mainTableMap;
 
     /**
-     * Constructs a CdbMake object and prepares it for the creation of a
+     * Constructs a CdbBuilder object and prepares it for the creation of a
+     * constant database by manual manipulation.  No dump file is used.  The
+     * tmp path is still necessary, as per spec.
+     */
+    public CdbBuilder(Path cdbPath) throws CdbException {
+        this.cdbPath = cdbPath;
+        this.cdbDumpPath = null;
+        this.cdbTmpPath = DEFAULT_CDB_TMP_PATH.resolve(
+                DEFAULT_CDB_TMP_PREFIX + cdbPath.getFileName());
+        try {
+            openCdbTmpFile();
+            cdbTmpFileChannel.position(MAIN_TABLE_SIZE);
+        } catch (IOException ex) {
+            cleanUp();
+            throw new CdbIOException("Could not open temp cdb file.", ex);
+        }
+        mainTableMap = new TreeMap<>();
+    }
+
+    /**
+     * Constructs a CdbBuilder object and prepares it for the creation of a
      * constant database.  If the cdb file does not exist, create an empty one.
      * If it does exist, use it as the basis for creating a new one.
      */
-    public Make(Path cdbPath, Path cdbDumpPath) throws CdbException {
+    public CdbBuilder(Path cdbPath, Path cdbDumpPath) throws CdbException {
         this(cdbPath, cdbDumpPath,
                 DEFAULT_CDB_TMP_PATH.resolve(DEFAULT_CDB_TMP_PREFIX + cdbPath.getFileName()));
     }
 
     /**
-     * Constructs a CdbMake object and prepares it for the creation of a
+     * Constructs a CdbBuilder object and prepares it for the creation of a
      * constant database.  If the cdb file does not exist, create an empty one.
      * If it does exist, use it as the basis for creating a new one.
      */
-    public Make(Path cdbPath, Path cdbDumpPath, Path cdbTmpPath) throws CdbException {
+    public CdbBuilder(Path cdbPath, Path cdbDumpPath, Path cdbTmpPath) throws CdbException {
         if (!Files.exists(cdbDumpPath)) {
             throw new CdbException("cdb dump file '" +
                     cdbDumpPath.toString() +
@@ -119,76 +147,144 @@ public final class Make {
         this.cdbPath = cdbPath;
         this.cdbDumpPath = cdbDumpPath;
         this.cdbTmpPath = cdbTmpPath;
+        mainTableMap = new TreeMap<>();
+        try {
+            openCdbTmpFile();
+            processCdbDumpFile();
+        } catch (IOException ex) {
+            cleanUp();
+            throw new CdbIOException("Could not open temp cdb file.", ex);
+        }
     }
 
-    public void makeCdb() throws CdbException {
-        try (RandomAccessFile raf = new RandomAccessFile(cdbTmpPath.toFile(), "rw");
-                FileChannel fc = raf.getChannel();
-                InputStream is = Files.newInputStream(cdbDumpPath, StandardOpenOption.READ)) {
-            raf.seek(MAIN_TABLE_SIZE);
-            Map<Integer, List<Pair<Key, Long>>> mainTableMap = processCdbElements(is, fc);
-            long slotTableStart = fc.position();
-            for (Map.Entry<Integer, List<Pair<Key, Long>>> mainEntry : mainTableMap.entrySet()) {
-                // write the main table entry
-                slotTableStart = writeElementMap(fc, mainEntry.getKey(),
-                        slotTableStart, mainEntry.getValue());
+    public CdbBuilder add(byte[] key, byte[] data) {
+        try {
+            processCdbElement(new CdbElement(key, data));
+        } catch (IOException ex) {
+            cleanUp();
+            throw new CdbIOException("Exception adding data.", ex);
+        }
+        return this;
+    }
+
+    public void build() throws CdbException {
+        try {
+            long slotTableStart = cdbTmpFileChannel.position();
+
+            for (int i = 0 ; i < MAIN_TABLE_ENTRIES ; i++) {
+                List<Pair<Key, Long>> mainList = mainTableMap.get(i);
+                if (mainList != null) {
+                    slotTableStart = writeElementMap(i, slotTableStart, mainList);
+                } else {
+                    positionIndex(i);
+                    writeIntPair((int)slotTableStart, 0);
+                }
             }
+        } catch (IOException ex) {
+            throw new CdbIOException("Exception while writing cdb tmp file.", ex);
+        } finally {
+            closeFiles();
+        }
+
+        try {
+            // move the file to the real file.
+            Files.move(cdbTmpPath, cdbPath,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ex) {
             throw new CdbIOException("Exception while writing cdb file.", ex);
         }
     }
 
-    private Map<Integer, List<Pair<Key, Long>>> processCdbElements(InputStream is, FileChannel fc)
+    private void openCdbTmpFile() throws IOException {
+        cdbTmpFile = new RandomAccessFile(cdbTmpPath.toFile(), "rw");
+        cdbTmpFileChannel = cdbTmpFile.getChannel();
+    }
+
+    private void closeFiles() {
+        if (cdbTmpFileChannel != null) {
+            try { cdbTmpFileChannel.close(); } catch (IOException ex) {}
+            cdbTmpFileChannel = null;
+        }
+        if (cdbTmpFile != null) {
+            try { cdbTmpFile.close(); } catch (IOException ex) {}
+            cdbTmpFile = null;
+        }
+    }
+
+    private void cleanUp() {
+        closeFiles();
+        try { Files.deleteIfExists(cdbTmpPath); } catch (IOException ex) {}
+    }
+
+    private void processCdbDumpFile() {
+        try (InputStream is = Files.newInputStream(cdbDumpPath, StandardOpenOption.READ)) {
+            cdbTmpFileChannel.position(MAIN_TABLE_SIZE);
+            processCdbDumpElements(is);
+        } catch (IOException ex) {
+            cleanUp();
+            throw new CdbIOException("Exception reading cdb dump file.", ex);
+        }
+    }
+
+    private void processCdbDumpElements(InputStream is)
             throws IOException {
-        Map<Integer, List<Pair<Key, Long>>> mainTableMap = new TreeMap<>();
         int chr;
         while ((chr = is.read()) != '\n') {
             if (chr != '+') {
+                cleanUp();
                 throw new CdbFormatException(
                         "Incorrect cdb dump file format.  " +
                                 "Expected '+', read '" + (char) chr + "'.");
             }
-            final CdbElement cdbElement = readCdbElement(is);
-            mainTableMap.computeIfAbsent(cdbElement.key.hashMod256(), k -> new ArrayList<>())
-                    .add(new Pair<>(cdbElement.key, fc.position()));
-            writeIntPair(fc, cdbElement.key.key.length, cdbElement.data.length);
-            fc.write(ByteBuffer.wrap(cdbElement.key.key));
-            fc.write(ByteBuffer.wrap(cdbElement.data));
-        }
-        return mainTableMap;
-    }
-
-    private long writeElementMap(FileChannel fc, int mainTableIndex,
-            long slotTableStart, List<Pair<Key, Long>> elementInfoList)
-                    throws IOException {
-        positionIndex(fc, mainTableIndex);
-        int slotTableSize = elementInfoList.size() * 2;
-        writeIntPair(fc, (int) slotTableStart, slotTableSize);
-        Map<Integer, List<IntPair>> slotMap =
-                buildSlotMap(slotTableSize, elementInfoList);
-        writeSlotMap(fc, slotTableStart, slotTableSize, slotMap);
-        return slotTableStart + (slotTableSize << 3);
-    }
-
-    private void writeSlotMap(FileChannel fc, long slotTableStart,
-            int slotTableSize, Map<Integer, List<IntPair>> slotMap)
-                    throws IOException {
-        for (Map.Entry<Integer, List<IntPair>> slotEntry : slotMap.entrySet()) {
-            int slotIndex = slotEntry.getKey();
-            writeSlotList(fc, slotTableStart, slotTableSize, slotIndex,
-                    slotEntry.getValue());
+            processCdbElement(readCdbElement(is));
         }
     }
 
-    private void writeSlotList(FileChannel fc, long slotTableStart,
-            int slotTableSize, int slotIndex, List<IntPair> slotInfoList)
+    private void processCdbElement(CdbElement cdbElement)
                     throws IOException {
-        for (IntPair ip : slotInfoList) {
-            positionIndex(fc, slotIndex++, slotTableStart);
-            writeIntPair(fc, ip);
-            if (slotIndex >= slotTableSize) {
-                slotIndex = 0;
+        mainTableMap.computeIfAbsent(cdbElement.key.hashMod256(), k -> new ArrayList<>())
+                .add(new Pair<>(cdbElement.key, cdbTmpFileChannel.position()));
+        writeIntPair(cdbElement.key.key.length, cdbElement.data.length);
+        cdbTmpFileChannel.write(ByteBuffer.wrap(cdbElement.key.key));
+        cdbTmpFileChannel.write(ByteBuffer.wrap(cdbElement.data));
+    }
+
+    private long writeElementMap(int mainTableIndex, long slotTableStart,
+            List<Pair<Key, Long>> elementRefList) throws IOException {
+        // write the main map entry
+        positionIndex(mainTableIndex);
+        // elementRefTableCapacity is the number of reference table entries
+        int elementRefTableCapacity = elementRefList.size() << 1; // * 2
+        writeIntPair((int) slotTableStart, elementRefTableCapacity);
+        Map<Integer, List<IntPair>> elementRefMap =
+                buildSlotMap(elementRefTableCapacity, elementRefList);
+        int elementRefTableBytes = elementRefTableCapacity << 3;
+        ByteBuffer bb = ByteBuffer.allocate(elementRefTableBytes)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        IntBuffer elementRefTable = bb.asIntBuffer();
+        elementRefMap.forEach((k, v) -> writeElementRef(elementRefTable,
+                elementRefTableCapacity << 1,
+                k << 1, v.iterator()));
+        bb.position(elementRefTableBytes);
+        bb.flip();
+        positionIndex(0, slotTableStart);
+        cdbTmpFileChannel.write(bb);
+        return cdbTmpFileChannel.position();
+    }
+
+    private void writeElementRef(IntBuffer elementRefTable,
+            int elementRefTableCount, int elementIndex,
+            Iterator<IntPair> elementRefIter) {
+        IntPair elementRef = elementRefIter.next();
+        elementRefTable.put(elementIndex++, elementRef.first);
+        elementRefTable.put(elementIndex++, elementRef.second);
+        if (elementRefIter.hasNext()) {
+            if (elementIndex >= elementRefTableCount) {
+                elementIndex = 0;
             }
+            writeElementRef(elementRefTable, elementRefTableCount,
+                    elementIndex, elementRefIter);
         }
     }
 
@@ -197,6 +293,7 @@ public final class Make {
                 readIntFromStream(is, ','),
                 readIntFromStream(is, ':'));
         if (lengths.first > MAX_DATA_LENGTH || lengths.second > MAX_DATA_LENGTH) {
+            cleanUp();
             throw new CdbFormatException("Key or data is too large for cdb.");
         }
         return new CdbElement(
@@ -215,6 +312,7 @@ public final class Make {
             }
         }
         if (chr != terminator) {
+            cleanUp();
             throw new CdbFormatException(
                     "Incorrect cdb dump file format.  " +
                             "Expected '" + terminator +
@@ -231,7 +329,8 @@ public final class Make {
             throw new CdbFormatException("Expected " + count + " bytes but read " + actual);
         }
         byte[] trm = new byte[terminator.length];
-        if (is.read(trm) != terminator.length || Arrays.equals(terminator, trm)) {
+        if (!(is.read(trm) == terminator.length && Arrays.equals(terminator, trm))) {
+            cleanUp();
             throw new CdbFormatException(
                     "Incorrect cdb dump file format.  " +
                             "Expected '" + new String(terminator) +
@@ -240,23 +339,19 @@ public final class Make {
         return ba;
     }
 
-    private void positionIndex(FileChannel fc, int index) throws IOException {
-        this.positionIndex(fc, index, 0);
+    private void positionIndex(int index) throws IOException {
+        this.positionIndex(index, 0);
     }
 
-    private void positionIndex(FileChannel fc, int index, long offset) throws IOException {
-        fc.position(offset + (index << 3)); // effectively offset + (index * Integer.BYTES * 2)
+    private void positionIndex(int index, long offset) throws IOException {
+        cdbTmpFileChannel.position(offset + (index << 3)); // effectively offset + (index * Integer.BYTES * 2)
     }
 
-    private void writeIntPair(FileChannel fc, IntPair ip) throws IOException {
-        this.writeIntPair(fc, ip.first, ip.second);
-    }
-
-    private void writeIntPair(FileChannel fc, int first, int second) throws IOException {
+    private void writeIntPair(int first, int second) throws IOException {
         intPairBuffer.putInt(first);
         intPairBuffer.putInt(second);
         intPairBuffer.flip();
-        fc.write(intPairBuffer);
+        cdbTmpFileChannel.write(intPairBuffer);
         intPairBuffer.clear();
     }
 
