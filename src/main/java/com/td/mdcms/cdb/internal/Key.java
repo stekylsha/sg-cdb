@@ -33,4 +33,20 @@ public class Key {
         }
         return h;
     }
+
+    /**
+     * Convenience for getting the {@code hash % 256}.
+     * @return The last two bytes of the hash.
+     */
+    public int hashMod256() {
+        return (hash & 0x00ff);
+    }
+
+    /**
+     * Convenience for getting the {@code hash / 256}.
+     * @return The hash divided by 256.
+     */
+    public int hashDiv256() {
+        return (hash >>> 8);
+    }
 }
