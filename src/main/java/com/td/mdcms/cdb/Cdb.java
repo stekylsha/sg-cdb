@@ -35,7 +35,7 @@ import com.td.mdcms.cdb.model.ByteArrayPair;
  * @author Michael Alyn Miller <malyn@strangeGizmo.com>
  * @version 1.0.3
  */
-public class Cdb implements Iterable<ByteArrayPair> {
+public class Cdb implements AutoCloseable, Iterable<ByteArrayPair> {
 
     /**
      * 256 entries * (4 bytes + 4 bytes)
@@ -98,6 +98,7 @@ public class Cdb implements Iterable<ByteArrayPair> {
     /**
      * Closes the CDB database.
      */
+    @Override
     public final void close() {
         try {
             if (cdbFile != null) {
