@@ -34,6 +34,14 @@ public class CdbDumpFileWriterTest {
     }
 
     @Test
+    public void openOutputNotExists() throws IOException {
+        Files.deleteIfExists(cdbDumpPath.get());
+        CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
+        cdfw.writeDumpElement(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA);
+        cdfw.close();
+    }
+
+    @Test
     public void writeSimpleDumpBytes() throws IOException, URISyntaxException {
         CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
         cdfw.writeDumpElement(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA);

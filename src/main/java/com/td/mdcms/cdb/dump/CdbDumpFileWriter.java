@@ -19,21 +19,16 @@ public class CdbDumpFileWriter implements AutoCloseable {
     private static final String TMP_DUMP_SUFFIX = ".cdb-dump";
 
     private Path cdbDumpPath;
-    private Path cdbDumpTmpPath;
     private OutputStream cdbDumpOutputStream;
 
     public CdbDumpFileWriter(Path cdbDumpPath) throws CdbIOException {
         this.cdbDumpPath = cdbDumpPath;
         try {
-            cdbDumpTmpPath = Files.createTempFile(
-                    Path.of(System.getProperty("java.io.tmpdir")),
-                    TMP_DUMP_PREFIX, TMP_DUMP_SUFFIX);
-            if (((Files.exists(cdbDumpPath) && Files.isWritable(cdbDumpPath)) ||
-                    (Files.notExists(cdbDumpPath) && Files.isWritable(cdbDumpPath.getParent()))) &&
-                    ((Files.exists(cdbDumpTmpPath) && Files.isWritable(cdbDumpTmpPath)) ||
-                    (Files.notExists(cdbDumpTmpPath) && Files.isWritable(cdbDumpTmpPath.getParent())))) {
+            if ((Files.exists(cdbDumpPath) && Files.isWritable(cdbDumpPath)) ||
+                    (Files.notExists(cdbDumpPath) && Files.isWritable(cdbDumpPath.getParent()))) {
                 this.cdbDumpOutputStream =
-                        Files.newOutputStream(cdbDumpTmpPath,
+                        Files.newOutputStream(cdbDumpPath,
+                                StandardOpenOption.CREATE,
                                 StandardOpenOption.WRITE,
                                 StandardOpenOption.TRUNCATE_EXISTING
                         );
@@ -75,9 +70,6 @@ public class CdbDumpFileWriter implements AutoCloseable {
             try {
                 cdbDumpOutputStream.write('\n');
                 cdbDumpOutputStream.close();
-                Files.move(cdbDumpTmpPath, cdbDumpPath,
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException ioe) {
                 cleanUp();
                 throw new CdbIOException("Problem dumping finale.", ioe);
@@ -90,7 +82,7 @@ public class CdbDumpFileWriter implements AutoCloseable {
     private void cleanUp() {
         try {
             cdbDumpOutputStream.close();
-            Files.deleteIfExists(cdbDumpTmpPath);
+            Files.deleteIfExists(cdbDumpPath);
         } catch (IOException ex) {
             LOG.debug("Ignoring IOException while closing dump input stream.");
         } finally {
