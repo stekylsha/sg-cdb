@@ -2,8 +2,10 @@ package com.td.mdcms.cdb;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,6 +20,7 @@ import com.td.mdcms.cdb.model.ByteArrayPair;
 import com.td.mdcms.cdb.model.Pair;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -53,18 +56,13 @@ public class CdbTest {
 
     /**
      * Everything works as expected.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyOpenClose() throws IOException {
-        Path cdbFilePath = createEmptyCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
+    public void testHappyOpenClose() {
+        Path cdbPath = createEmptyCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
+            // Just checking to make sure it works.
+            assertNotNull(cdb);
         }
     }
 
@@ -72,7 +70,7 @@ public class CdbTest {
      * The cdb file does not exist. A {@link CdbException} is expected.
      */
     @Test
-    public void testSadOpenNoFile() throws IOException {
+    public void testSadOpenNoFile() {
         assertThrows(CdbException.class, () -> {
             Cdb cdb = new Cdb(Path.of(
                 System.getProperty("java.io.tmpdir"),
@@ -83,154 +81,107 @@ public class CdbTest {
 
     /**
      * The cdb file is zero length. A {@link CdbException} is expected.
+     * @throws IOException Maybe, when creating or deleting the temp file.
      */
     @Test
-    public void testSadOpenEmptyFile() {
+    public void testSadOpenEmptyFile() throws IOException {
+        Path cdbEmptyFilePath = Files.createTempFile(TEST_CDB_PREFIX, TEST_CDB_SUFFIX);
         assertThrows(CdbException.class, () -> {
-            Path cdbFilePath = Files.createTempFile(TEST_CDB_PREFIX, TEST_CDB_SUFFIX);
-            Cdb cdb = null;
-            try {
-                cdb = new Cdb(cdbFilePath);
-            } finally {
-                if (cdb != null) {
-                    cdb.close();
-                }
+            try (Cdb cdb = new Cdb(cdbEmptyFilePath)) {
+                // should never be here
+                fail("Badness ensues.");
             }
         });
+        Files.deleteIfExists(cdbEmptyFilePath);
     }
 
     /**
      * Close the cdb twice.  This should be handled gracefully.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testSadDoubleClose() throws IOException {
-        Path cdbFilePath = createEmptyCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testSadDoubleClose() {
+        Path cdbPath = createEmptyCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             cdb.close();
             cdb.close();
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Find a key/data for a simple cdb: one key/one value.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyFindSimple() throws IOException {
-        Path cdbFilePath = createSimpleCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyFindSimple() {
+        Path cdbPath = createSimpleCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             byte[] data = cdb.find(TEST_KEY_SINGLE);
             assertArrayEquals(TEST_DATA_SINGLE, data);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Find the first key/data for a more complex cdb. one key/two values.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyFindComplexFirst() throws IOException {
-        Path cdbFilePath = createComplexCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyFindComplexFirst() {
+        Path cdbPath = createComplexCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             byte[] actual = cdb.find(TEST_KEY_MULTI);
-            // The actual may either of the values, so test for both.
+            // The actual may be either of the values, so test for both.
             boolean contains = TEST_DATA_MULTI_LIST.stream()
                     .anyMatch(ba -> Arrays.equals(ba, actual));
             assertTrue(contains);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Find all of the key/data for a more complex cdb. one key/two values.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyFindComplexAll() throws IOException {
-        Path cdbFilePath = createComplexCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyFindComplexAll() {
+        Path cdbPath = createComplexCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             final List<byte[]> actual = cdb.findAll(TEST_KEY_MULTI);
             assertMultiContains(actual);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Iterate over a key with a single value.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyIterateKeySimple() throws IOException {
-        Path cdbFilePath = createSimpleCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyIterateKeySimple() {
+        Path cdbPath = createSimpleCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             Iterator<byte[]> cdbKeyIter = cdb.iterator(TEST_KEY_SINGLE);
             List<byte[]> actual = new ArrayList<>();
             cdbKeyIter.forEachRemaining(actual::add);
             assertEquals(1, actual.size());
             assertArrayEquals(TEST_DATA_SINGLE, actual.get(0));
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Iterate over a key with a multiple values.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyIterateKeyComplex() throws IOException {
-        Path cdbFilePath = createComplexCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyIterateKeyComplex() {
+        Path cdbPath = createComplexCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             Iterator<byte[]> cdbKeyIter = cdb.iterator(TEST_KEY_MULTI);
             List<byte[]> actual = new ArrayList<>();
             cdbKeyIter.forEachRemaining(actual::add);
             assertMultiContains(actual);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
     /**
      * Iterate over a key with a multiple values.
-     * @throws IOException If the setup fails.
      */
     @Test
-    public void testHappyIterate() throws IOException {
-        Path cdbFilePath = createComplexCdb();
-        Cdb cdb = null;
-        try {
-            cdb = new Cdb(cdbFilePath);
+    public void testHappyIterate() {
+        Path cdbPath = createComplexCdb();
+        try (Cdb cdb = new Cdb(cdbPath)) {
             Iterator<ByteArrayPair> cdbKeyIter = cdb.iterator();
             List<byte[]> actual = new ArrayList<>();
             cdbKeyIter.forEachRemaining(bap -> {
@@ -238,32 +189,28 @@ public class CdbTest {
                 actual.add(bap.second);
             });
             assertMultiContains(actual);
-        } finally {
-            if (cdb != null) {
-                cdb.close();
-            }
         }
     }
 
-    private Path createEmptyCdb() throws IOException {
+    private Path createEmptyCdb() {
         Pair<Path, CdbBuilder> pair = openCdbMake();
         return finishCdbMake(pair);
     }
 
-    private Path createSimpleCdb() throws IOException {
+    private Path createSimpleCdb() {
         Pair<Path, CdbBuilder> pair = openCdbMake();
         pair.second.add(TEST_KEY_SINGLE, TEST_DATA_SINGLE);
         return finishCdbMake(pair);
     }
 
-    private Path createComplexCdb() throws IOException {
+    private Path createComplexCdb() {
         Pair<Path, CdbBuilder> pair = openCdbMake();
         pair.second.add(TEST_KEY_MULTI, TEST_DATA_MULTI_ONE);
         pair.second.add(TEST_KEY_MULTI, TEST_DATA_MULTI_TWO);
         return finishCdbMake(pair);
     }
 
-    private Pair<Path, CdbBuilder> openCdbMake() throws IOException {
+    private Pair<Path, CdbBuilder> openCdbMake() {
         return new Pair<>(cdbFilePath.get(), new CdbBuilder(cdbFilePath.get()));
     }
 

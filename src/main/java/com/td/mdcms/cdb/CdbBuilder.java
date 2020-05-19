@@ -14,21 +14,25 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import com.td.mdcms.cdb.dump.CdbDumpFileReader;
 import com.td.mdcms.cdb.exception.CdbException;
 import com.td.mdcms.cdb.exception.CdbFormatException;
 import com.td.mdcms.cdb.exception.CdbIOException;
 import com.td.mdcms.cdb.internal.IntPair;
 import com.td.mdcms.cdb.internal.Key;
+import com.td.mdcms.cdb.model.ByteArrayPair;
 import com.td.mdcms.cdb.model.Pair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Makes a constant database (cdb) as per the cdb spec.  From
@@ -56,6 +60,7 @@ import com.td.mdcms.cdb.model.Pair;
  * for historical purposes.
  */
 public final class CdbBuilder {
+    private static final Logger LOG = LoggerFactory.getLogger(CdbBuilder.class);
 
     /**
      * 256 entries * (Integer.BYTES * 2)
@@ -115,7 +120,6 @@ public final class CdbBuilder {
                 DEFAULT_CDB_TMP_PREFIX + cdbPath.getFileName());
         try {
             openCdbTmpFile();
-            cdbTmpFileChannel.position(MAIN_TABLE_SIZE);
         } catch (IOException ex) {
             cleanUp();
             throw new CdbIOException("Could not open temp cdb file.", ex);
@@ -159,10 +163,10 @@ public final class CdbBuilder {
 
     public CdbBuilder add(byte[] key, byte[] data) {
         try {
-            processCdbElement(new CdbElement(key, data));
-        } catch (IOException ex) {
+            processCdbDumpElement.accept(new ByteArrayPair(key, data));
+        } catch (CdbIOException ex) {
             cleanUp();
-            throw new CdbIOException("Exception adding data.", ex);
+            throw ex;
         }
         return this;
     }
@@ -199,6 +203,7 @@ public final class CdbBuilder {
     private void openCdbTmpFile() throws IOException {
         cdbTmpFile = new RandomAccessFile(cdbTmpPath.toFile(), "rw");
         cdbTmpFileChannel = cdbTmpFile.getChannel();
+        cdbTmpFileChannel.position(MAIN_TABLE_SIZE);
     }
 
     private void closeFiles() {
@@ -217,38 +222,30 @@ public final class CdbBuilder {
         try { Files.deleteIfExists(cdbTmpPath); } catch (IOException ex) {}
     }
 
-    private void processCdbDumpFile() {
-        try (InputStream is = Files.newInputStream(cdbDumpPath, StandardOpenOption.READ)) {
-            cdbTmpFileChannel.position(MAIN_TABLE_SIZE);
-            processCdbDumpElements(is);
-        } catch (IOException ex) {
+    private void processCdbDumpFile()
+            throws CdbFormatException, CdbIOException {
+        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+            cdfr.forEach(processCdbDumpElement);
+        } catch (CdbFormatException | CdbIOException ex) {
             cleanUp();
-            throw new CdbIOException("Exception reading cdb dump file.", ex);
+            throw ex;
         }
     }
 
-    private void processCdbDumpElements(InputStream is)
-            throws IOException {
-        int chr;
-        while ((chr = is.read()) != '\n') {
-            if (chr != '+') {
-                cleanUp();
-                throw new CdbFormatException(
-                        "Incorrect cdb dump file format.  " +
-                                "Expected '+', read '" + (char) chr + "'.");
-            }
-            processCdbElement(readCdbElement(is));
+    private final Consumer<ByteArrayPair> processCdbDumpElement = (bap) -> {
+        LOG.debug("Processing pair '{}', '{}'",
+                new String(bap.first), new String(bap.second));
+        Key key = new Key(bap.first);
+        try {
+            mainTableMap.computeIfAbsent(key.hashMod256(), k -> new ArrayList<>())
+                    .add(new Pair<>(key, cdbTmpFileChannel.position()));
+            writeIntPair(bap.first.length, bap.second.length);
+            cdbTmpFileChannel.write(ByteBuffer.wrap(bap.first));
+            cdbTmpFileChannel.write(ByteBuffer.wrap(bap.second));
+        } catch (IOException ex) {
+            throw new CdbIOException("Could not write cdb element.", ex);
         }
-    }
-
-    private void processCdbElement(CdbElement cdbElement)
-                    throws IOException {
-        mainTableMap.computeIfAbsent(cdbElement.key.hashMod256(), k -> new ArrayList<>())
-                .add(new Pair<>(cdbElement.key, cdbTmpFileChannel.position()));
-        writeIntPair(cdbElement.key.key.length, cdbElement.data.length);
-        cdbTmpFileChannel.write(ByteBuffer.wrap(cdbElement.key.key));
-        cdbTmpFileChannel.write(ByteBuffer.wrap(cdbElement.data));
-    }
+    };
 
     private long writeElementMap(int mainTableIndex, long slotTableStart,
             List<Pair<Key, Long>> elementRefList) throws IOException {
@@ -288,57 +285,6 @@ public final class CdbBuilder {
         }
     }
 
-    private CdbElement readCdbElement(InputStream is) throws IOException {
-        IntPair lengths = new IntPair(
-                readIntFromStream(is, ','),
-                readIntFromStream(is, ':'));
-        if (lengths.first > MAX_DATA_LENGTH || lengths.second > MAX_DATA_LENGTH) {
-            cleanUp();
-            throw new CdbFormatException("Key or data is too large for cdb.");
-        }
-        return new CdbElement(
-                readBytesFromStream(is, lengths.first, "->".getBytes()),
-                readBytesFromStream(is, lengths.second, "\n".getBytes())
-        );
-    }
-
-    private int readIntFromStream(InputStream is, char terminator)
-            throws CdbFormatException, IOException {
-        int intRead = 0;
-        int chr;
-        while ((chr = is.read()) >= 0 && chr != terminator) {
-            if (Character.isDigit(chr)) {
-                intRead = (intRead * 10) + Character.getNumericValue(chr);
-            }
-        }
-        if (chr != terminator) {
-            cleanUp();
-            throw new CdbFormatException(
-                    "Incorrect cdb dump file format.  " +
-                            "Expected '" + terminator +
-                            "', read '" + (char)chr + "'.");
-        }
-        return intRead;
-    }
-
-    private byte[] readBytesFromStream(InputStream is, int count, byte[] terminator)
-            throws IOException {
-        byte[] ba = new byte[count];
-        int actual = is.read(ba);
-        if (actual != count) {
-            throw new CdbFormatException("Expected " + count + " bytes but read " + actual);
-        }
-        byte[] trm = new byte[terminator.length];
-        if (!(is.read(trm) == terminator.length && Arrays.equals(terminator, trm))) {
-            cleanUp();
-            throw new CdbFormatException(
-                    "Incorrect cdb dump file format.  " +
-                            "Expected '" + new String(terminator) +
-                            "', read '" + new String(trm) + "'.");
-        }
-        return ba;
-    }
-
     private void positionIndex(int index) throws IOException {
         this.positionIndex(index, 0);
     }
@@ -366,25 +312,5 @@ public final class CdbBuilder {
                                 Collectors.toList()
                         )
                 ));
-    }
-
-    private static class CdbElement {
-        /** The key value for this element. */
-        public final Key key;
-
-        /** The data value for this element. */
-        public final byte[] data;
-
-        /**
-         * Creates an instance of the CdbElement class and initializes it
-         * with the given key and data values.
-         *
-         * @param keyBytes The key value for this element.
-         * @param data The data value for this element.
-         */
-        public CdbElement(byte[] keyBytes, byte[] data) {
-            this.key = new Key(keyBytes);
-            this.data = data;
-        }
     }
 }
