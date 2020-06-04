@@ -2,6 +2,7 @@ package com.td.mdcms.cdb.dump;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static com.td.mdcms.cdb.TestResources.COMPLEX_DUMP_LIST;
 import static com.td.mdcms.cdb.TestResources.HAPPY_COMPLEX;
 import static com.td.mdcms.cdb.TestResources.HAPPY_SIMPLE;
@@ -23,6 +24,7 @@ import static com.td.mdcms.cdb.TestResources.VERY_COMPLEX_DUMP_LIST;
 import static com.td.mdcms.cdb.TestResources.getDumpResourceUri;
 
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,7 +51,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void doubleClose() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             cdfr.close();
         }
    }
@@ -57,7 +59,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void readDumpSimpleHappy() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             List<ByteArrayPair> dumpList = new ArrayList<>();
             cdfr.forEach(dumpList::add);
             assertEquals(SIMPLE_DUMP_LIST, dumpList);
@@ -67,7 +69,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void readDumpSimpleInlineCrHappy() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE_INLINE_CR));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             List<ByteArrayPair> dumpList = new ArrayList<>();
             cdfr.forEach(dumpList::add);
             assertEquals(SIMPLE_CR_DUMP_LIST, dumpList);
@@ -77,7 +79,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void readDumpSimpleInlineNlHappy() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE_INLINE_NL));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             List<ByteArrayPair> dumpList = new ArrayList<>();
             cdfr.forEach(dumpList::add);
             assertEquals(SIMPLE_NL_DUMP_LIST, dumpList);
@@ -87,7 +89,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void readDumpComplexHappy() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_COMPLEX));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             List<ByteArrayPair> dumpList = new ArrayList<>();
             cdfr.forEach(dumpList::add);
             assertEquals(COMPLEX_DUMP_LIST, dumpList);
@@ -97,7 +99,7 @@ public class CdbDumpFileReaderTest {
     @Test
     public void readDumpVeryComplexHappy() throws URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_VERY_COMPLEX));
-        try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+        try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
             List<ByteArrayPair> dumpList = new ArrayList<>();
             cdfr.forEach(dumpList::add);
             assertEquals(VERY_COMPLEX_DUMP_LIST, dumpList);
@@ -154,7 +156,7 @@ public class CdbDumpFileReaderTest {
 
     private void assertSadFormatException(Path cdbDumpPath) {
         assertThrows(CdbFormatException.class, () -> {
-            try (CdbDumpFileReader cdfr = new CdbDumpFileReader(cdbDumpPath)) {
+            try (CdbDumpReader cdfr = new CdbDumpReader(cdbDumpPath)) {
                 List<ByteArrayPair> dumpList = new ArrayList<>();
                 cdfr.forEach(dumpList::add);
             }

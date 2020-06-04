@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 
 import com.td.mdcms.cdb.exception.CdbIOException;
@@ -12,8 +11,8 @@ import com.td.mdcms.cdb.model.ByteArrayPair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CdbDumpFileWriter implements AutoCloseable {
-    private static final Logger LOG = LoggerFactory.getLogger(CdbDumpFileWriter.class);
+public class CdbDumpWriter implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(CdbDumpWriter.class);
 
     private static final String TMP_DUMP_PREFIX = "tmp-";
     private static final String TMP_DUMP_SUFFIX = ".cdb-dump";
@@ -21,7 +20,7 @@ public class CdbDumpFileWriter implements AutoCloseable {
     private Path cdbDumpPath;
     private OutputStream cdbDumpOutputStream;
 
-    public CdbDumpFileWriter(Path cdbDumpPath) throws CdbIOException {
+    public CdbDumpWriter(Path cdbDumpPath) throws CdbIOException {
         this.cdbDumpPath = cdbDumpPath;
         try {
             if ((Files.exists(cdbDumpPath) && Files.isWritable(cdbDumpPath)) ||
@@ -42,11 +41,11 @@ public class CdbDumpFileWriter implements AutoCloseable {
         }
     }
 
-    public CdbDumpFileWriter writeDumpElement(byte[] key, byte[] value) throws CdbIOException {
+    public CdbDumpWriter writeDumpElement(byte[] key, byte[] value) throws CdbIOException {
         return writeDumpElement(new ByteArrayPair(key, value));
     }
 
-    public CdbDumpFileWriter writeDumpElement(ByteArrayPair kv) throws CdbIOException {
+    public CdbDumpWriter writeDumpElement(ByteArrayPair kv) throws CdbIOException {
         try {
             LOG.debug("dumping kv '{}'", kv);
             cdbDumpOutputStream.write('+');

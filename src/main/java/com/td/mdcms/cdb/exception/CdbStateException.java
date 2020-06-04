@@ -9,7 +9,7 @@ package com.td.mdcms.cdb.exception;
  * when there is no next; calling methods on a CDB that has been closed; and
  * other horrific acts.
  */
-public class CdbStateException extends RuntimeException {
+public class CdbStateException extends CdbException {
 
     public CdbStateException() {
         super();

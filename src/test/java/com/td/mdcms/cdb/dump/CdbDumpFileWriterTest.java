@@ -36,14 +36,14 @@ public class CdbDumpFileWriterTest {
     @Test
     public void openOutputNotExists() throws IOException {
         Files.deleteIfExists(cdbDumpPath.get());
-        CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
+        CdbDumpWriter cdfw = new CdbDumpWriter(cdbDumpPath.get());
         cdfw.writeDumpElement(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA);
         cdfw.close();
     }
 
     @Test
     public void writeSimpleDumpBytes() throws IOException, URISyntaxException {
-        CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
+        CdbDumpWriter cdfw = new CdbDumpWriter(cdbDumpPath.get());
         cdfw.writeDumpElement(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA);
         cdfw.close();
 
@@ -53,7 +53,7 @@ public class CdbDumpFileWriterTest {
 
     @Test
     public void writeSimpleDumpByteArrayPair() throws IOException, URISyntaxException {
-        CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
+        CdbDumpWriter cdfw = new CdbDumpWriter(cdbDumpPath.get());
         cdfw.writeDumpElement(new ByteArrayPair(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA));
         cdfw.close();
 
@@ -63,8 +63,8 @@ public class CdbDumpFileWriterTest {
 
     @Test
     public void writeComplexDump() throws IOException, URISyntaxException {
-        CdbDumpFileWriter cdfw = new CdbDumpFileWriter(cdbDumpPath.get());
-        VERY_COMPLEX_DUMP_LIST.forEach(bap -> cdfw.writeDumpElement(bap));
+        CdbDumpWriter cdfw = new CdbDumpWriter(cdbDumpPath.get());
+        VERY_COMPLEX_DUMP_LIST.forEach(cdfw::writeDumpElement);
         cdfw.close();
 
         Path expectedPath = Path.of(getDumpResourceUri(HAPPY_VERY_COMPLEX));

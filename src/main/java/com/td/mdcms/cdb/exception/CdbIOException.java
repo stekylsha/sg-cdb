@@ -7,7 +7,7 @@ package com.td.mdcms.cdb.exception;
 /**
  * Exception specific for reading and/or writing the CDB or CDB dump files.
  */
-public class CdbIOException extends RuntimeException {
+public class CdbIOException extends CdbException {
 
     public CdbIOException() {
         super();

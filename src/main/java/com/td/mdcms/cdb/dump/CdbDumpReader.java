@@ -16,8 +16,8 @@ import com.td.mdcms.cdb.model.ByteArrayPair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CdbDumpFileReader implements AutoCloseable, Iterable<ByteArrayPair> {
-    private static final Logger LOG = LoggerFactory.getLogger(CdbDumpFileReader.class);
+public class CdbDumpReader implements AutoCloseable, Iterable<ByteArrayPair> {
+    private static final Logger LOG = LoggerFactory.getLogger(CdbDumpReader.class);
 
     /**
      * The max data length should be
@@ -34,7 +34,7 @@ public class CdbDumpFileReader implements AutoCloseable, Iterable<ByteArrayPair>
 
     private InputStream cdbDumpInputStream;
 
-    public CdbDumpFileReader(Path cdbDumpPath) throws CdbIOException {
+    public CdbDumpReader(Path cdbDumpPath) throws CdbIOException {
         try {
             if (Files.exists(cdbDumpPath) &&
                     Files.isReadable(cdbDumpPath)) {
@@ -140,6 +140,10 @@ public class CdbDumpFileReader implements AutoCloseable, Iterable<ByteArrayPair>
                 cdbDumpInputStream.mark(2);
                 int chr = cdbDumpInputStream.read();
                 cdbDumpInputStream.reset();
+                if (chr != '+' && chr != '\n') {
+                    throw new CdbFormatException(
+                            "Bad initial record character or file terminator.");
+                }
                 return chr != '\n';
             } catch (IOException ex) {
                 safeClose();

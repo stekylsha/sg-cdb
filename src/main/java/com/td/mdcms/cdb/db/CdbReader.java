@@ -2,7 +2,7 @@
  * Copyright (C) 2019 by Teradata Corporation. All Rights Reserved. TERADATA CORPORATION
  * CONFIDENTIAL AND TRADE SECRET
  */
-package com.td.mdcms.cdb;
+package com.td.mdcms.cdb.db;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -31,11 +31,8 @@ import com.td.mdcms.cdb.model.ByteArrayPair;
 /**
  * Cdb implements a Java interface to D.&nbsp;J.&nbsp;Bernstein's CDB
  * database.
- *
- * @author Michael Alyn Miller <malyn@strangeGizmo.com>
- * @version 1.0.3
  */
-public class Cdb implements AutoCloseable, Iterable<ByteArrayPair> {
+public class CdbReader implements AutoCloseable, Iterable<ByteArrayPair> {
 
     /**
      * 256 entries * (4 bytes + 4 bytes)
@@ -82,7 +79,7 @@ public class Cdb implements AutoCloseable, Iterable<ByteArrayPair> {
      * @throws CdbException if the CDB file could not be
      * opened.
      */
-    public Cdb(Path filepath) throws CdbException {
+    public CdbReader(Path filepath) throws CdbException {
         try {
             cdbFile = new RandomAccessFile(filepath.toFile(), "r");
             cdbFileChannel = cdbFile.getChannel();
@@ -119,13 +116,12 @@ public class Cdb implements AutoCloseable, Iterable<ByteArrayPair> {
      * @return The record store under the given key, or
      * {@code null} if no record with that key could be found.
      */
-    public final byte[] find(byte[] byteKey) {
+    public final byte[] readOne(byte[] byteKey) {
         Key key = new Key(byteKey);
         List<Long> recordOffsets;
         try {
             recordOffsets = initFind(key);
         } catch (IOException ex) {
-            // FIXME change it into a CdbException
             throw new CdbIOException("Could not get the record offsets.", ex);
         }
         byte[] record = null;
@@ -142,7 +138,7 @@ public class Cdb implements AutoCloseable, Iterable<ByteArrayPair> {
      * @return The records stored under the given key, or
      * an empty list if no records with that key could be found.
      */
-    public final List<byte[]> findAll(byte[] byteKey) {
+    public final List<byte[]> readAll(byte[] byteKey) {
         final Key key = new Key(byteKey);
         List<Long> recordOffsets;
         try {

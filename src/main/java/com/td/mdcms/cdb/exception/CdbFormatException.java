@@ -7,7 +7,7 @@ package com.td.mdcms.cdb.exception;
 /**
  * Exception specific to incorrectly formatted CDB and CDB dump files.
  */
-public class CdbFormatException extends RuntimeException {
+public class CdbFormatException extends CdbException {
 
     public CdbFormatException() {
         super();

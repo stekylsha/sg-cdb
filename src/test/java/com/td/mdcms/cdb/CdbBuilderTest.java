@@ -18,6 +18,7 @@ import static com.td.mdcms.cdb.TestResources.assertFilesMatch;
 import static com.td.mdcms.cdb.TestResources.getDumpResourceUri;
 import static com.td.mdcms.cdb.TestResources.getResourceUri;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
@@ -27,8 +28,11 @@ import com.td.mdcms.cdb.exception.CdbFormatException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CdbBuilderTest {
+    private static final Logger LOG = LoggerFactory.getLogger(CdbBuilderTest.class);
 
     private ThreadLocal<Path> cdbFilePath;
     private ThreadLocal<Path> cdbTmpFilePath;
@@ -53,20 +57,10 @@ public class CdbBuilderTest {
     }
 
     @Test
-    public void testCdbPathConstructorHappy() throws IOException {
-        CdbBuilder builder = new CdbBuilder(cdbFilePath.get());
-        builder.build();
-        assertEquals(2048L, Files.size(cdbFilePath.get()));
-        assertTrue(Files.notExists(cdbTmpFilePath.get()));
-    }
-
-    @Test
-    public void testCdbPathConstructorSimpleHappy()
+    public void testCdbDumpSimpleTwoParamHappy()
             throws IOException, URISyntaxException {
-        CdbBuilder builder = new CdbBuilder(cdbFilePath.get());
-        // FIXME make it look like the simple dump
-        builder.add(HAPPY_SIMPLE_KEY, HAPPY_SIMPLE_DATA);
-        builder.build();
+        Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE));
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath);
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -79,9 +73,7 @@ public class CdbBuilderTest {
     public void testCdbDumpSimpleHappy()
             throws IOException, URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE));
-        CdbBuilder builder = new CdbBuilder(
-                cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
-        builder.build();
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -94,9 +86,7 @@ public class CdbBuilderTest {
     public void testCdbDumpSimpleInlineCrHappy()
             throws IOException, URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE_INLINE_CR));
-        CdbBuilder builder = new CdbBuilder(
-                cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
-        builder.build();
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -109,9 +99,7 @@ public class CdbBuilderTest {
     public void testCdbDumpSimpleInlineNlHappy()
             throws IOException, URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_SIMPLE_INLINE_NL));
-        CdbBuilder builder = new CdbBuilder(
-                cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
-        builder.build();
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -124,9 +112,7 @@ public class CdbBuilderTest {
     public void testCdbDumpComplexHappy()
             throws IOException, URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_COMPLEX));
-        CdbBuilder builder = new CdbBuilder(
-                cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
-        builder.build();
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -139,9 +125,7 @@ public class CdbBuilderTest {
     public void testCdbDumpVeryComplexHappy()
             throws IOException, URISyntaxException {
         Path cdbDumpPath = Path.of(getDumpResourceUri(HAPPY_VERY_COMPLEX));
-        CdbBuilder builder = new CdbBuilder(
-                cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
-        builder.build();
+        CdbBuilder.build(cdbFilePath.get(), cdbDumpPath, cdbTmpFilePath.get());
         assertTrue(Files.exists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
 
@@ -156,10 +140,10 @@ public class CdbBuilderTest {
         Path cdbDumpPath = Path.of(getDumpResourceUri(SAD_FORMAT_EOF));
         Files.deleteIfExists(cdbFilePath.get());
         assertThrows(CdbFormatException.class,
-                () -> new CdbBuilder(
+                () -> CdbBuilder.build(
                         cdbFilePath.get(),
                         cdbDumpPath,
-                        cdbTmpFilePath.get()).build());
+                        cdbTmpFilePath.get()));
         assertTrue(Files.notExists(cdbFilePath.get()));
         assertTrue(Files.notExists(cdbTmpFilePath.get()));
     }
