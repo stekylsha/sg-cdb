@@ -5,8 +5,20 @@ plugins {
     id 'maven-publish'
 }
 
+def gitBranch() {
+    def branch = ""
+    def proc = "git rev-parse --abbrev-ref HEAD".execute()
+    proc.in.eachLine { line -> branch = line }
+    proc.err.eachLine { line -> println line }
+    proc.waitFor()
+    if (!branch.equals("master")) {
+        branch = "-" + branch
+    }
+    branch
+}
+
 group 'com.td.mdcms'
-version '1.0.2'
+version "1.0.2${gitBranch()}"
 
 compileJava {
     options.compilerArgs.addAll(['--release', '11', '-Xlint:unchecked', '-Xlint:deprecation'])
